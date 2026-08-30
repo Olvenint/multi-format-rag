@@ -6,9 +6,10 @@ __pycache__/
 # ---- 运行时数据（向量库 / 提取图片 / 去重记录 / 对话历史）----
 runtime/
 
-# ---- 敏感配置（防止误提交 Key）----
+# ---- 敏感配置（防止误提交 Key；.env.example 模板保留）----
 .env
 .env.*
+!.env.example
 *.key
 *.pem
 
