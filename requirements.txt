@@ -1,0 +1,15 @@
+# ---- 向量化 / 检索（LangChain 生态）----
+langchain-core
+langchain-community
+langchain-chroma
+langchain-deepseek
+dashscope
+
+# ---- 文档解析 ----
+python-docx
+PyMuPDF
+pdfplumber
+openpyxl
+
+# ---- Web 界面 ----
+gradio
