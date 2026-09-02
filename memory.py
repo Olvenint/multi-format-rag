@@ -15,10 +15,10 @@
         "context": "【参考资料 1】\n标题：...\n内容：..."
     }
 
-集成方式（在 docx_qa.py 中）：
+集成方式（在 qa_service.py 中）：
     from memory import ConversationMemory
 
-    class DocxQAService:
+    class QAService:
         def __init__(self):
             ...
             self.memory = ConversationMemory()    # ← 初始化记忆
