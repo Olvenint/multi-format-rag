@@ -14,22 +14,42 @@
 - **对话记忆**：滑动窗口记录最近 N 轮对话，支持多轮追问
 - **Web 界面**：基于 Gradio，开箱即用
 
-## 系统流程
+## 系统架构
 
+```mermaid
+flowchart TB
+    subgraph IN["输入层"]
+        D1["docx 文档"] & D2["PDF 文档"] & D3["TXT 文档"] & D4["Excel 文档"]
+    end
+
+    subgraph LD["解析层 loaders/"]
+        F["loader_factory<br/>工厂按扩展名分发"]
+        L1["docx_loader"] & L2["pdf_loader"] & L3["txt_loader"] & L4["excel_loader"]
+        L1 -.- L2 -.- L3 -.- L4
+    end
+
+    subgraph ST["向量层"]
+        E["嵌入模型<br/>text-embedding-v4"]
+        C[("Chroma 向量库<br/>本地持久化")]
+    end
+
+    subgraph QA["问答层"]
+        R["检索 TOP-K"]
+        M["对话模型<br/>deepseek-v4-pro"]
+        V["视觉模型<br/>qwen-vl-max（PDF 图片转写）"]
+    end
+
+    D1 & D2 & D3 & D4 --> F
+    F --> L1 & L2 & L3 & L4
+    L1 & L2 & L3 & L4 --> E --> C
+
+    U["用户问题"] --> R --> C
+    C --> R --> M --> A["回答"]
+    R -.图片内容补充.- V
+    MEM["对话记忆<br/>滑动窗口"] -.多轮上下文.- M
 ```
-用户文档(docx/pdf/txt/excel)
-        │  Loader 解析（工厂模式 + 抽象基类）
-        ▼
-  结构化文本片段 + 元数据
-        │  嵌入模型(text-embedding-v4)
-        ▼
-   Chroma 向量库（本地持久化）
-        │  检索 TOP-K
-        ▼
-  用户问题 ──► 相似片段 ──► 大模型(deepseek-v4-pro) ──► 回答
-                        ▲
-                  对话记忆（滑动窗口）
-```
+
+**流程一句话**：用户文档 → 对应 Loader 解析成文本片段 → 嵌入模型向量化 → 存入 Chroma → 用户提问时检索 TOP-K 相关片段 → 连同对话记忆交给大模型生成回答；PDF 中的图片页面会先经视觉模型转写。
 
 ## 目录结构
 
