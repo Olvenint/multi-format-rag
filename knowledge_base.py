@@ -15,7 +15,7 @@
 """
 import os
 import hashlib                       # 用于文件去重
-import datetime                      # 用于记录入库时间
+from datetime import datetime           # 用于记录入库时间
 from typing import List
 from langchain_chroma import Chroma
 from langchain_community.embeddings import DashScopeEmbeddings
