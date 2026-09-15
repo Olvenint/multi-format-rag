@@ -49,8 +49,19 @@ class Reranker:
                 query=query,
                 documents=[d.page_content for d in docs],
             )
+            # 先校验响应状态：失败时 output 可能为 None，直接访问会掩盖真实原因
+            if response is None or getattr(response, "status_code", None) != 200:
+                code = getattr(response, "code", None)
+                message = getattr(response, "message", None) or str(response)
+                raise RuntimeError(
+                    f"status={getattr(response, 'status_code', None)} "
+                    f"code={code} msg={message}"
+                )
+            output = getattr(response, "output", None)
+            if output is None or not getattr(output, "results", None):
+                raise RuntimeError("响应中无 results 字段（模型未开通或名称错误）")
             results = sorted(
-                response.output.results,
+                output.results,
                 key=lambda r: r.relevance_score,
                 reverse=True,
             )
