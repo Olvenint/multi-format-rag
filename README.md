@@ -14,7 +14,7 @@
 - **对话记忆**：滑动窗口记录最近 N 轮对话，支持多轮追问
 - **Web 界面**：基于 Gradio，开箱即用
 - **混合检索**：向量 + BM25 双路召回 → RRF 融合，专有名词不再漏召
-- **查询改写**：口语 → 术语自动扩展（词典法，`runtime/rewrite_dict.json` 可自定义）
+- **查询改写**：口语 → 术语自动扩展（词典法，`rewrite_dict.json` 可自定义）
 - **Rerank 精排**：API 精排把最相关片段排到最前，失败自动降级不阻塞
 
 ## 界面演示
@@ -77,6 +77,7 @@ flowchart TB
 ├── bm25_index.py       # BM25 词法索引（自实现，混合检索）
 ├── query_rewriter.py   # 查询改写（词典法）
 ├── reranker.py         # Rerank 精排（API，熔断降级）
+├── rewrite_dict.json   # 查询改写词典（用户可编辑）
 ├── memory.py            # 对话记忆（滑动窗口）
 ├── loaders/             # 各类文档解析器
 │   ├── base_loader.py   #   抽象基类

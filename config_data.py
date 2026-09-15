@@ -31,7 +31,7 @@ TOP_K = 3                    # 最终返回给 LLM 的文档数
 # ============================================================
 # --- 查询改写（L04，词典法）---
 REWRITE_ENABLED = True                                          # 查询改写开关
-REWRITE_DICT_PATH = os.path.join(RUNTIME_DIR, "rewrite_dict.json")  # 外部词典（用户可编辑）
+REWRITE_DICT_PATH = os.path.join(_BASE_DIR, "rewrite_dict.json")  # 外部词典（用户可编辑）
 
 # --- 混合检索（L03：向量 + BM25 双路 → RRF 融合）---
 HYBRID_ENABLED = True                                           # 混合检索开关
