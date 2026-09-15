@@ -13,6 +13,9 @@
 - **PDF 图文并重**：文本用 pdfplumber 抽取、含图页面用视觉模型转写
 - **对话记忆**：滑动窗口记录最近 N 轮对话，支持多轮追问
 - **Web 界面**：基于 Gradio，开箱即用
+- **混合检索**：向量 + BM25 双路召回 → RRF 融合，专有名词不再漏召
+- **查询改写**：口语 → 术语自动扩展（词典法，`runtime/rewrite_dict.json` 可自定义）
+- **Rerank 精排**：API 精排把最相关片段排到最前，失败自动降级不阻塞
 
 ## 界面演示
 
@@ -44,7 +47,7 @@ flowchart TB
     end
 
     subgraph QA["问答层"]
-        R["检索 TOP-K"]
+        R["混合检索 + Rerank"]
         M["对话模型<br/>deepseek-v4-pro"]
         V["视觉模型<br/>qwen-vl-max（PDF 图片转写）"]
     end
@@ -59,7 +62,7 @@ flowchart TB
     MEM["对话记忆<br/>滑动窗口"] -.多轮上下文.- M
 ```
 
-**流程一句话**：用户文档 → 对应 Loader 解析成文本片段 → 嵌入模型向量化 → 存入 Chroma → 用户提问时检索 TOP-K 相关片段 → 连同对话记忆交给大模型生成回答；PDF 中的图片页面会先经视觉模型转写。
+**流程一句话**：用户文档 → 对应 Loader 解析成文本片段 → 嵌入模型向量化 → 存入 Chroma → 用户提问时经查询改写 → 混合检索（向量 + BM25）→ RRF 融合 → Rerank 精排 → 截取 TOP-K 相关片段 → 连同对话记忆交给大模型生成回答；PDF 中的图片页面会先经视觉模型转写。
 
 ## 目录结构
 
@@ -71,6 +74,9 @@ flowchart TB
 ├── loader_factory.py    # 加载器工厂（按扩展名分发）
 ├── knowledge_base.py    # 向量库操作（入库/检索/查询）
 ├── qa_service.py        # 问答服务（检索+LLM+视觉）
+├── bm25_index.py       # BM25 词法索引（自实现，混合检索）
+├── query_rewriter.py   # 查询改写（词典法）
+├── reranker.py         # Rerank 精排（API，熔断降级）
 ├── memory.py            # 对话记忆（滑动窗口）
 ├── loaders/             # 各类文档解析器
 │   ├── base_loader.py   #   抽象基类
@@ -162,6 +168,7 @@ python app_chat.py
 |---|---|
 | v1.0 | 仅支持 docx 解析入库 + 基础问答 |
 | v2.0 | 支持 pdf/txt/excel；表格感知解析；文件 MD5 去重；对话记忆；Gradio 界面 |
+| v2.1 | 检索增强：混合检索（BM25 + RRF）、查询改写、Rerank 精排 |
 
 ## License
 

@@ -212,6 +212,14 @@ class KnowledgeBase:
         # 记录新 MD5
         _save_md5(file_md5)
 
+        # 3.0：入库完成后重建 BM25 索引（供在线混合检索使用）
+        try:
+            from bm25_index import BM25Index
+            BM25Index.rebuild_from_chroma(self.chroma, config.BM25_INDEX_PATH)
+            print(f"  BM25 索引已重建（{config.BM25_INDEX_PATH}）")
+        except Exception as e:
+            print(f"  [警告] BM25 索引重建失败：{e}")
+
         return {
             "total": len(documents),
             "inserted": inserted,

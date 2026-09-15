@@ -24,7 +24,27 @@ MEMORY_PATH = os.path.join(RUNTIME_DIR, "conversation_memory.jsonl")
 OUTPUT_DIR = os.path.join(RUNTIME_DIR, "output")
 
 # 检索配置
-TOP_K = 3                    # 检索返回的文档数（多格式后适当增大）
+TOP_K = 3                    # 最终返回给 LLM 的文档数
+
+# ============================================================
+# 检索增强配置（3.0：查询改写 + 混合检索 + Rerank）
+# ============================================================
+# --- 查询改写（L04，词典法）---
+REWRITE_ENABLED = True                                          # 查询改写开关
+REWRITE_DICT_PATH = os.path.join(RUNTIME_DIR, "rewrite_dict.json")  # 外部词典（用户可编辑）
+
+# --- 混合检索（L03：向量 + BM25 双路 → RRF 融合）---
+HYBRID_ENABLED = True                                           # 混合检索开关
+HYBRID_TOP_N = 10                                               # 各路检索候选数（融合前放宽）
+BM25_INDEX_PATH = os.path.join(RUNTIME_DIR, "bm25_index.pkl")   # BM25 索引持久化路径
+BM25_K1 = 1.5                                                   # BM25 词频饱和参数（默认值）
+BM25_B = 0.75                                                   # BM25 长度惩罚参数（默认值）
+RRF_K = 60                                                      # RRF 融合常数（L03 默认 60）
+
+# --- Rerank 精排（L05，API 版，失败自动熔断降级）---
+RERANK_ENABLED = True                                           # Rerank 开关
+RERANK_MODEL = "gte-rerank"                                     # 百炼 rerank 模型
+RERANK_TOP_N = 10                                               # 送给 Rerank 的候选数
 
 # 记忆配置
 MEMORY_WINDOW = 5            # 滑动窗口大小：只保留最近 N 轮对话

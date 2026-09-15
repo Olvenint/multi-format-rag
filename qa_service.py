@@ -23,7 +23,8 @@ docx 文档 AI 问答服务 —— 在线流程（向量检索 + 预计算描述
 # ============================================================
 import os                       # 文件路径拼接、判断文件是否存在
 import base64                   # 把图片二进制编码为 base64 字符串，方便发给视觉 API
-from typing import List         # 类型注解，标明参数/返回值是列表
+from typing import List
+from collections import defaultdict         # 类型注解，标明参数/返回值是列表
 
 # ============================================================
 # LangChain 核心组件
@@ -51,6 +52,9 @@ from langchain_deepseek import ChatDeepSeek
 # ============================================================
 import config_data as config
 from memory import ConversationMemory
+from bm25_index import BM25Index
+from query_rewriter import QueryRewriter
+from reranker import Reranker
 #   数据库路径（PERSIST_DIRECTORY）、表名（COLLECTION_NAME）、
 #   嵌入模型名（EMBEDDING_MODEL）、检索数量（TOP_K）、
 #   聊天模型（CHAT_MODEL）、视觉模型（VISION_MODEL）等
@@ -208,9 +212,63 @@ class DocxRetriever:
             search_kwargs={"k": self.top_k}
         )
 
+        # ---------- 3.0 检索增强组件 ----------
+        # 查询改写（L04）：口语 → 术语，解决词汇鸿沟
+        self.rewriter = QueryRewriter(enabled=config.REWRITE_ENABLED)
+
+        # BM25 词法索引（L03）：无索引时首次自动从向量库重建
+        self.bm25 = BM25Index.load(config.BM25_INDEX_PATH)
+        if self.bm25 is None and config.HYBRID_ENABLED:
+            try:
+                self.bm25 = BM25Index.rebuild_from_chroma(self.chroma, config.BM25_INDEX_PATH)
+                print("[检索] BM25 索引已从向量库自动重建（首次运行）")
+            except Exception as e:
+                self.bm25 = None
+                print(f"[警告] BM25 索引构建失败（{e}），混合检索退化为纯向量")
+
+        # Rerank 精排（L05）：失败自动熔断降级为原排序
+        self.reranker = Reranker(model=config.RERANK_MODEL, enabled=config.RERANK_ENABLED)
+
+    @staticmethod
+    def _doc_key(doc: Document) -> str:
+        """用文本内容哈希作为文档唯一键（同一 chunk 去重）"""
+        return str(hash(doc.page_content))
+
+    def _hybrid_search(self, query: str, top_n: int) -> List[Document]:
+        """
+        单查询双路检索：向量（Chroma） + 词法（BM25）→ RRF 融合（L03）
+        返回按 RRF 分数降序的文档列表（最多 top_n 条）
+        """
+        fused = defaultdict(float)
+        doc_map = {}
+
+        # 路 1：向量检索
+        try:
+            for rank, doc in enumerate(
+                self.chroma.similarity_search(query, k=top_n), start=1
+            ):
+                key = self._doc_key(doc)
+                fused[key] += 1.0 / (config.RRF_K + rank)
+                doc_map.setdefault(key, doc)
+        except Exception as e:
+            print(f"[警告] 向量检索失败：{e}")
+
+        # 路 2：BM25 词法检索（索引缺失时跳过，交给向量路兜底）
+        if self.bm25 is not None:
+            for rank, (doc, _score) in enumerate(
+                self.bm25.search(query, top_n=top_n), start=1
+            ):
+                key = self._doc_key(doc)
+                fused[key] += 1.0 / (config.RRF_K + rank)
+                doc_map.setdefault(key, doc)
+
+        ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
+        return [doc_map[k] for k, _ in ranked]
+
+
     def retrieve(self, query: str) -> tuple:
         """
-        执行向量检索，读取预计算的图片描述
+        3.0 检索增强版检索：改写 → 混合检索（向量+BM25）→ RRF 融合 → Rerank，读取预计算的图片描述
 
         返回值三元组说明：
             docs:             List[Document]
@@ -227,8 +285,30 @@ class DocxRetriever:
         参数：
             query: 用户自然语言问题
         """
-        # ① 向量检索：query 被向量化后，和数据库中的文档向量做余弦相似度计算
-        docs: List[Document] = self.retriever.invoke(query)
+        # ① 查询改写 + 混合检索 + RRF 融合 + Rerank（3.0 检索增强）
+        #    docs 含义不变：仍是"最终喂给 LLM 的 top_k 片段"
+        search_queries = [query]
+        if config.REWRITE_ENABLED:
+            rewritten = self.rewriter.rewrite(query)
+            if rewritten and rewritten != query:
+                search_queries.append(rewritten)
+
+        candidate_map = {}
+        rrf_scores = defaultdict(float)
+        for sq in search_queries:
+            if config.HYBRID_ENABLED:
+                hits = self._hybrid_search(sq, config.HYBRID_TOP_N)
+            else:
+                hits = self.chroma.similarity_search(sq, k=config.HYBRID_TOP_N)
+            for rank, doc in enumerate(hits, start=1):
+                key = self._doc_key(doc)
+                candidate_map.setdefault(key, doc)
+                rrf_scores[key] += 1.0 / (config.RRF_K + rank)
+
+        ranked = sorted(rrf_scores.items(), key=lambda kv: kv[1], reverse=True)
+        docs: List[Document] = [candidate_map[k] for k, _ in ranked]
+        docs = self.reranker.rerank(query, docs, self.top_k)
+        docs = docs[: self.top_k]
 
         # ② 收集图片路径 + 读取预计算描述
         all_image_paths = []

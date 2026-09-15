@@ -4,6 +4,7 @@ langchain-community
 langchain-chroma
 langchain-deepseek
 dashscope
+jieba  # BM25 中文分词（可选，未装自动降级）
 
 # ---- 文档解析 ----
 python-docx
