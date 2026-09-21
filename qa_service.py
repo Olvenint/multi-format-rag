@@ -55,6 +55,14 @@ from memory import ConversationMemory
 from bm25_index import BM25Index
 from query_rewriter import QueryRewriter
 from reranker import Reranker
+
+# ============================================================
+# IPv4 优先补丁（v4.0.1 性能 hotfix）
+# 本机 IPv6 不通：DNS 优先返回 IPv6 → 每次连接挂 2×21s 超时才回退 IPv4，
+# 导致 embedding / 视觉 / 对话 API 每次调用多等 ~42s。此补丁全局过滤 IPv6。
+# ============================================================
+from ipv4_patch import apply_ipv4_first
+apply_ipv4_first()
 #   数据库路径（PERSIST_DIRECTORY）、表名（COLLECTION_NAME）、
 #   嵌入模型名（EMBEDDING_MODEL）、检索数量（TOP_K）、
 #   聊天模型（CHAT_MODEL）、视觉模型（VISION_MODEL）等
