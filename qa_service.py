@@ -57,7 +57,7 @@ from query_rewriter import QueryRewriter
 from reranker import Reranker
 
 # ============================================================
-# IPv4 优先补丁（v4.0.1 性能 hotfix）
+# IPv4 优先补丁（v4.1 性能 hotfix）
 # 本机 IPv6 不通：DNS 优先返回 IPv6 → 每次连接挂 2×21s 超时才回退 IPv4，
 # 导致 embedding / 视觉 / 对话 API 每次调用多等 ~42s。此补丁全局过滤 IPv6。
 # ============================================================

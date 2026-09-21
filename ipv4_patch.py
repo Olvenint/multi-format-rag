@@ -1,5 +1,5 @@
 """
-IPv4 优先补丁（v4.0.1 性能 hotfix）
+IPv4 优先补丁（v4.1 性能 hotfix）
 
 背景（排查结论）：
     本机网络不通 IPv6，而 dashscope.aliyuncs.com 的 DNS 解析优先返回 2 个 IPv6 地址。
@@ -38,4 +38,4 @@ def apply_ipv4_first():
     if not _patched:
         socket.getaddrinfo = _ipv4_first
         _patched = True
-        print("[IPv4补丁] 已启用 IPv4 优先（跳过 IPv6 超时，API 调用不再多等 ~42s）")
+        print("[IPv4补丁] 已启用 IPv4 优先（跳过 IPv6 超时，API 调用不再多等 ）")
