@@ -12,7 +12,7 @@ docx 文档 AI 问答服务 —— 在线流程（向量检索 + 预计算描述
       → ConversationMemory.save()                将本轮问答持久化到 conversation_memory.jsonl
 
 图片描述策略（企业级做法）：
-    入库阶段：DocxKnowledgeBase.upload_documents() 对每张图片调用 qwen-vl-max，
+    入库阶段：KnowledgeBase.upload_documents() 对每张图片调用 qwen-vl-max（4.0 起并行），
               将描述存入 metadata["image_description"]，一次计算永久使用。
     查询阶段：DocxRetriever.retrieve() 直接读取 metadata["image_description"]，
               零次视觉 API 调用，查询速度从分钟级降到秒级。
@@ -105,7 +105,7 @@ def _describe_single_image(img_path: str) -> str:
     职责：只描述一张图，不做拼接格式化。
     被两处调用：
         1. describe_images() —— 批量描述时逐张调用
-        2. DocxKnowledgeBase.upload_documents() —— 入库时预计算
+        2. KnowledgeBase.upload_documents() —— 入库时预计算（4.0 起并行调用）
 
     参数：
         img_path: 图片绝对路径
@@ -181,7 +181,7 @@ class DocxRetriever:
         2. 检查命中文档的 metadata["image_description"] 字段（入库时预计算）
         3. 返回 (文档列表, 图片描述, 图片路径) 三元组
 
-    企业级做法：图片描述在入库时已由 DocxKnowledgeBase 预计算并存入
+    企业级做法：图片描述在入库时已由 KnowledgeBase 预计算并存入
     metadata["image_description"]，查询时直接读取，零次视觉 API 调用。
 
     使用示例：

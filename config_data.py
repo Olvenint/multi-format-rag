@@ -46,6 +46,12 @@ RERANK_ENABLED = True                                           # Rerank 开关
 RERANK_MODEL = "gte-rerank"                                     # 百炼 rerank 模型
 RERANK_TOP_N = 10                                               # 送给 Rerank 的候选数
 
+# ============================================================
+# 入库性能配置（4.0：批量 + 并行，依据学习 L06）
+# ============================================================
+INGEST_IMAGE_WORKERS = 4    # 图片描述并行线程数（IO 密集，4~8 为宜；过大易触发 API 限流）
+INGEST_BATCH_SIZE = 32      # 向量化批量提交批次大小（每批一次 add_texts 往返）
+
 # 记忆配置
 MEMORY_WINDOW = 5            # 滑动窗口大小：只保留最近 N 轮对话
 

@@ -146,8 +146,9 @@ class ConversationMemory:
             最近 N 条记录列表（按时间升序）
         """
         with open(self.file_path, "r", encoding="utf-8") as f:
-            # deque(maxlen=limit)：队列满后自动丢弃最旧的行
-            tail = deque(f, maxlen=config.MEMORY_WINDOW)
+            # deque(maxlen=limit)：队列满后自动丢弃最旧的行（用传入的 limit，
+            # 不使用 config.MEMORY_WINDOW，避免参数失效——两者默认值相同但 limit 更灵活）
+            tail = deque(f, maxlen=limit)
         return [json.loads(line) for line in tail if line.strip()]
 
     # ============================================================

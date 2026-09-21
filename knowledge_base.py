@@ -14,7 +14,9 @@
   4. 测试入口使用 LoaderFactory，支持任意格式
 """
 import os
+import time                               # 4.0：记录入库各阶段耗时
 import hashlib                       # 用于文件去重
+from concurrent.futures import ThreadPoolExecutor   # 4.0：图片描述并行（L06）
 from datetime import datetime           # 用于记录入库时间
 from typing import List
 from langchain_chroma import Chroma
@@ -129,6 +131,9 @@ class KnowledgeBase:
         file_md5 = _get_file_md5(file_path)
         source_name = os.path.basename(file_path)
 
+        # 4.0：记录总耗时与分阶段耗时（帮助观察性能优化效果）
+        t_total_start = time.time()
+
         # MD5 去重：文件内容没变，直接跳过
         if _check_md5(file_md5):
             return {
@@ -148,6 +153,7 @@ class KnowledgeBase:
 
         # ============================================================
         # 预计算图片描述（入库时一次性算好，查询时零 API 调用）
+        # 4.0：串行 → ThreadPoolExecutor 并行（L06），线程数可在 config 调
         # ============================================================
         from qa_service import _describe_single_image
 
@@ -162,17 +168,23 @@ class KnowledgeBase:
                     all_image_paths.append(path)
                     seen.add(path)
 
+        t_img_start = time.time()
         image_desc_map = {}
         if all_image_paths:
-            print(f"  预计算图片描述：共 {len(all_image_paths)} 张...")
-            for i, img_path in enumerate(all_image_paths):
-                print(f"    [{i + 1}/{len(all_image_paths)}] {os.path.basename(img_path)}", end="")
-                image_desc_map[img_path] = _describe_single_image(img_path)
-                print(f" ✓")
+            workers = config.INGEST_IMAGE_WORKERS
+            print(f"  预计算图片描述：共 {len(all_image_paths)} 张（{workers} 线程并行）...")
+            # pool.map 保持输入输出顺序一一对应；_describe_single_image 失败时
+            # 内部已捕获异常并返回错误提示字符串，不会中断整个入库
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                results = list(pool.map(_describe_single_image, all_image_paths))
+            image_desc_map = dict(zip(all_image_paths, results))
+            print(f"  ✓ 图片描述完成，耗时 {time.time() - t_img_start:.1f}s")
 
         # ============================================================
-        # 逐 chunk 入库
+        # 组装全部待入库 (text, metadata)，再按批次批量提交
+        # 4.0：逐 chunk add_texts → 批量 add_texts（L06），减少网络往返
         # ============================================================
+        pending = []
         for doc in documents:
             text = doc.page_content
             if not text.strip():
@@ -203,11 +215,20 @@ class KnowledgeBase:
                 if not (isinstance(v, list) and len(v) == 0)
             }
 
+            pending.append((text, metadata))
+
+        # 批量向量化提交（一批一次网络往返）
+        t_vec_start = time.time()
+        batch_size = config.INGEST_BATCH_SIZE
+        for i in range(0, len(pending), batch_size):
+            batch = pending[i:i + batch_size]
             self.chroma.add_texts(
-                texts=[text],
-                metadatas=[metadata]
+                texts=[item[0] for item in batch],
+                metadatas=[item[1] for item in batch],
             )
-            inserted += 1
+        inserted = len(pending)
+        if pending:
+            print(f"  ✓ 向量化入库 {inserted} 条，耗时 {time.time() - t_vec_start:.1f}s")
 
         # 记录新 MD5
         _save_md5(file_md5)
@@ -220,6 +241,8 @@ class KnowledgeBase:
         except Exception as e:
             print(f"  [警告] BM25 索引重建失败：{e}")
 
+        t_total = time.time() - t_total_start
+        print(f"  ⏱ 本次入库总耗时 {t_total:.1f}s")
         return {
             "total": len(documents),
             "inserted": inserted,

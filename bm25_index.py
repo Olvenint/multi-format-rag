@@ -126,7 +126,9 @@ class BM25Index:
         if not tf:
             return 0.0
         dl = self.doc_len[doc_idx]
-        denom = tf + self.k1 * (1.0 - self.b + self.b * dl / self.avgdl)
+        # 防御：avgdl=0（全库空文本）时退化为不考虑长度归一
+        avgdl = self.avgdl if self.avgdl > 0 else 1.0
+        denom = tf + self.k1 * (1.0 - self.b + self.b * dl / avgdl)
         return self.idf.get(term, 0.0) * tf * (self.k1 + 1.0) / denom
 
     # ----------------------------------------------------------
