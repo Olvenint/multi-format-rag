@@ -2,7 +2,7 @@
 
 一个**本地、多格式**的知识库问答（RAG）系统：把 `docx / pdf / txt / excel` 文档解析、向量化、存入本地向量库，再基于检索结果调用大模型回答你的问题。
 
-> 本项目为个人学习项目（v4.1），支持离线上库 + 在线问答两条流程，所有数据存本地，无需部署服务。
+> 本项目为个人学习项目（v4.2），支持离线上库 + 在线问答两条流程，所有数据存本地，无需部署服务。
 
 ## 功能特性
 
@@ -14,7 +14,7 @@
 - **对话记忆**：滑动窗口记录最近 N 轮对话，支持多轮追问
 - **Web 界面**：基于 Gradio，开箱即用
 - **混合检索**：向量 + BM25 双路召回 → RRF 融合，专有名词不再漏召
-- **查询改写**：口语 → 术语自动扩展（词典法，`rewrite_dict.json` 可自定义）
+- **查询改写自动化**：入库自动提取文档高频术语（`term_extractor.py` → `runtime/auto_dict.json`），查询时自动扩展（"成绩"→"学习成绩"），全程零手写
 - **Rerank 精排**：API 精排把最相关片段排到最前，失败自动降级不阻塞
 - **入库性能优化**：图片描述 4 线程并行 + 向量按批 32 提交（v4.0），实测 13 图 docx 入库 228s → 11.8s
 - **IPv4 优先补丁**：自动跳过 IPv6 超时（v4.1 hotfix），embedding 单次 42.9s → 0.7s，网络差环境也能秒连
@@ -77,10 +77,10 @@ flowchart TB
 ├── knowledge_base.py    # 向量库操作（入库/检索/查询）
 ├── qa_service.py        # 问答服务（检索+LLM+视觉）
 ├── bm25_index.py       # BM25 词法索引（自实现，混合检索）
-├── query_rewriter.py   # 查询改写（词典法）
+├── term_extractor.py   # 入库自动术语提取（v4.2，自动生成 auto_dict.json）
+├── query_rewriter.py   # 查询改写（v4.2 自动词典版）
 ├── reranker.py         # Rerank 精排（API，熔断降级）
 ├── ipv4_patch.py       # IPv4 优先补丁（v4.1 hotfix，幂等）
-├── rewrite_dict.json   # 查询改写词典（用户可编辑）
 ├── memory.py            # 对话记忆（滑动窗口）
 ├── loaders/             # 各类文档解析器
 │   ├── base_loader.py   #   抽象基类
@@ -91,7 +91,8 @@ flowchart TB
 └── runtime/             # 运行时数据（自动生成，不入库）
     ├── chroma_db/       #   向量库
     ├── output/          #   提取的图片
-    └── file_md5.txt     #   去重记录
+    ├── file_md5.txt     #   去重记录
+    └── auto_dict.json   #   自动术语词典（入库时生成）
 ```
 
 ## 快速开始
@@ -166,7 +167,10 @@ python app_chat.py
 **Q4：runtime/ 目录会自动生成？**
 是的，向量库、提取图片、去重记录都在 `runtime/` 下自动生成，已被 `.gitignore` 忽略，删除该目录不影响代码。
 
-**Q5：Rerank 功能需要额外配置吗？**
+**Q5：查询改写的词典在哪？需要手动维护吗？**
+不需要。`runtime/auto_dict.json` 由 `term_extractor.py` 在每次文档入库时自动生成/更新（自动提取文档高频实词），查询时 `query_rewriter.py` 自动匹配扩展。你只需正常入库文档即可，全程零手写。
+
+**Q6：Rerank 功能需要额外配置吗？**
 需要。系统内置 Rerank 精排（`reranker.py`，默认模型 `gte-rerank`），但 **Rerank 依赖你自行开通阿里云百炼的 `gte-rerank` 模型**（模型广场搜索「文本排序」开通，通常有免费额度）。未开通时系统自动降级为 RRF 排序，问答功能不受影响；开通后无需改代码，重启即生效。
 
 ## 项目演进
@@ -178,6 +182,7 @@ python app_chat.py
 | v3.0 | 检索增强：混合检索（BM25 + RRF）、查询改写、Rerank 精排 |
 | v4.0 | 入库性能优化：图片描述并行（4 线程）+ 向量批量提交（32/批） |
 | v4.1 | 性能 hotfix：IPv4 优先补丁，修复 IPv6 超时导致的 API 慢连接（实测提速 ~60 倍） |
+| v4.2 | 查询改写自动化：入库自动术语提取（term_extractor → auto_dict.json），查询自动扩展，零手写 |
 
 ## License
 

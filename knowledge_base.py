@@ -249,6 +249,14 @@ class KnowledgeBase:
         except Exception as e:
             print(f"  [警告] BM25 索引重建失败：{e}")
 
+        # 4.x：入库完成后自动提取领域术语，更新改写词典（零手写）
+        try:
+            from term_extractor import update_terms
+            total = update_terms(documents, source_name)
+            print(f"  ✓ 术语词典已更新（{config.AUTO_DICT_PATH}，当前 {total} 个术语）")
+        except Exception as e:
+            print(f"  [警告] 术语词典更新失败：{e}")
+
         t_total = time.time() - t_total_start
         print(f"  ⏱ 本次入库总耗时 {t_total:.1f}s")
         return {

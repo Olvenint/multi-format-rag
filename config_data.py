@@ -29,9 +29,9 @@ TOP_K = 3                    # 最终返回给 LLM 的文档数
 # ============================================================
 # 检索增强配置（3.0：查询改写 + 混合检索 + Rerank）
 # ============================================================
-# --- 查询改写（L04，词典法）---
+# --- 查询改写（L04，v4.2 自动词典版：入库自动提取术语，零手写）---
 REWRITE_ENABLED = True                                          # 查询改写开关
-REWRITE_DICT_PATH = os.path.join(_BASE_DIR, "rewrite_dict.json")  # 外部词典（用户可编辑）
+AUTO_DICT_PATH = os.path.join(RUNTIME_DIR, "auto_dict.json")    # 自动术语词典（入库时 TermExtractor 生成）
 
 # --- 混合检索（L03：向量 + BM25 双路 → RRF 融合）---
 HYBRID_ENABLED = True                                           # 混合检索开关
