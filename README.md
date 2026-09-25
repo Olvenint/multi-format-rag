@@ -2,7 +2,7 @@
 
 一个**本地、多格式**的知识库问答（RAG）系统：把 `docx / pdf / txt / excel` 文档解析、向量化、存入本地向量库，再基于检索结果调用大模型回答你的问题。
 
-> 本项目为个人学习项目（v4.2），支持离线上库 + 在线问答两条流程，所有数据存本地，无需部署服务。
+> 本项目为个人学习项目（v4.3），支持离线上库 + 在线问答两条流程，所有数据存本地，无需部署服务。
 
 ## 功能特性
 
@@ -18,6 +18,7 @@
 - **Rerank 精排**：API 精排把最相关片段排到最前，失败自动降级不阻塞
 - **入库性能优化**：图片描述 4 线程并行 + 向量按批 32 提交（v4.0），实测 13 图 docx 入库 228s → 11.8s
 - **IPv4 优先补丁**：自动跳过 IPv6 超时（v4.1 hotfix），embedding 单次 42.9s → 0.7s，网络差环境也能秒连
+- **Redis 两级缓存**（v4.3）：检索 + 回答两级缓存，高频问题命中缓存直接返回（省 embedding / rerank / DeepSeek 成本）；Redis 未启动自动熔断降级为直连，问答不受影响
 
 ## 界面演示
 
@@ -80,6 +81,7 @@ flowchart TB
 ├── term_extractor.py   # 入库自动术语提取（v4.2，自动生成 auto_dict.json）
 ├── query_rewriter.py   # 查询改写（v4.2 自动词典版）
 ├── reranker.py         # Rerank 精排（API，熔断降级）
+├── redis_cache.py       # Redis 两级缓存（v4.3，检索+回答，熔断降级）
 ├── ipv4_patch.py       # IPv4 优先补丁（v4.1 hotfix，幂等）
 ├── memory.py            # 对话记忆（滑动窗口）
 ├── loaders/             # 各类文档解析器
@@ -106,6 +108,15 @@ flowchart TB
 
 ```bash
 pip install -r requirements.txt
+```
+
+### 2.1 Redis 缓存（可选）
+
+Redis 用于缓存高频问答结果（v4.3）。**不安装 / 不启动也不影响使用**：系统自动降级为直连；启动后命中缓存可省 API 费用、加快响应。
+
+```bash
+pip install redis
+redis-server   # 启动 Redis（Windows 可下载 redis-windows 或 Memurai）
 ```
 
 ### 3. 配置 API Key（必做）
@@ -173,6 +184,9 @@ python app_chat.py
 **Q6：Rerank 功能需要额外配置吗？**
 需要。系统内置 Rerank 精排（`reranker.py`，默认模型 `gte-rerank`），但 **Rerank 依赖你自行开通阿里云百炼的 `gte-rerank` 模型**（模型广场搜索「文本排序」开通，通常有免费额度）。未开通时系统自动降级为 RRF 排序，问答功能不受影响；开通后无需改代码，重启即生效。
 
+**Q7：Redis 缓存（v4.3）必须要安装吗？**
+不需要。`redis_cache.py` 内置熔断降级：Redis 未启动 / 连接失败时自动跳过缓存直连问答（只打印一次提示），功能完全正常；想启用缓存只需 `pip install redis` 并启动 `redis-server`。文档更新时系统会自动清空旧缓存，无需手动处理。
+
 ## 项目演进
 
 | 版本 | 内容 |
@@ -183,6 +197,7 @@ python app_chat.py
 | v4.0 | 入库性能优化：图片描述并行（4 线程）+ 向量批量提交（32/批） |
 | v4.1 | 性能 hotfix：IPv4 优先补丁，修复 IPv6 超时导致的 API 慢连接（实测提速 ~60 倍） |
 | v4.2 | 查询改写自动化：入库自动术语提取（term_extractor → auto_dict.json），查询自动扩展，零手写 |
+| v4.3 | Redis 两级缓存：检索 + 回答缓存，高频问题命中直接返回，省 API 成本；未启动自动降级直连 |
 
 ## License
 

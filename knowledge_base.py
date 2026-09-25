@@ -257,6 +257,17 @@ class KnowledgeBase:
         except Exception as e:
             print(f"  [警告] 术语词典更新失败：{e}")
 
+        # 4.3：文档内容已变化 → 清空 Redis 两级缓存（旧检索/旧回答全部失效，
+        #     否则会出现"改了文档但回答还是旧的"的坑）
+        try:
+            from redis_cache import invalidate_all
+            if invalidate_all():
+                print("  ✓ Redis 缓存已清空（文档已更新，旧检索/旧回答失效）")
+            else:
+                print("  [提示] Redis 未启用或不可用，跳过缓存清理（问答走直连）")
+        except Exception as e:
+            print(f"  [警告] Redis 缓存清理失败：{e}")
+
         t_total = time.time() - t_total_start
         print(f"  ⏱ 本次入库总耗时 {t_total:.1f}s")
         return {

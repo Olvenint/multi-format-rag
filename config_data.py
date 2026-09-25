@@ -52,6 +52,18 @@ RERANK_TOP_N = 10                                               # 送给 Rerank 
 INGEST_IMAGE_WORKERS = 4    # 图片描述并行线程数（IO 密集，4~8 为宜；过大易触发 API 限流）
 INGEST_BATCH_SIZE = 32      # 向量化批量提交批次大小（每批一次 add_texts 往返）
 
+# ============================================================
+# Redis 缓存配置（4.3：两级缓存，依据学习 L07）
+# ============================================================
+REDIS_ENABLED = True                    # 总开关：False 时完全不用 Redis（直接走检索+生成）
+REDIS_HOST = "127.0.0.1"                # Redis 地址（本机默认）
+REDIS_PORT = 6379                       # Redis 端口（默认 6379）
+REDIS_DB = 0                            # Redis 数据库编号（默认 0）
+REDIS_PASSWORD = None                   # 密码（本机默认无密码）
+REDIS_SOCKET_TIMEOUT = 1.0              # 连接超时（秒）：超时即熔断降级，不阻塞问答
+RETRIEVAL_CACHE_TTL = 86400             # 检索缓存 TTL（秒，默认 24h；文档更新时会主动清空）
+ANSWER_CACHE_TTL = 86400                # 回答缓存 TTL（秒，默认 24h；文档更新时会主动清空）
+
 # 记忆配置
 MEMORY_WINDOW = 5            # 滑动窗口大小：只保留最近 N 轮对话
 

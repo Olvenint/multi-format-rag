@@ -55,6 +55,7 @@ from memory import ConversationMemory
 from bm25_index import BM25Index
 from query_rewriter import QueryRewriter
 from reranker import Reranker
+from redis_cache import RedisCache
 
 # ============================================================
 # IPv4 优先补丁（v4.1 性能 hotfix）
@@ -237,6 +238,10 @@ class DocxRetriever:
         # Rerank 精排（L05）：失败自动熔断降级为原排序
         self.reranker = Reranker(model=config.RERANK_MODEL, enabled=config.RERANK_ENABLED)
 
+        # 4.3：Redis 两级缓存（L07）——检索缓存在这里生效（键=原问题，命中跳过整个检索链）；
+        # 回答缓存在 DocxQAService 层生效（依赖历史，需单独处理）
+        self.cache = RedisCache()
+
     @staticmethod
     def _doc_key(doc: Document) -> str:
         """用文本内容哈希作为文档唯一键（同一 chunk 去重）"""
@@ -293,6 +298,13 @@ class DocxRetriever:
         参数：
             query: 用户自然语言问题
         """
+        # 4.3：先查检索缓存（L07）——键=原问题（改写前），命中直接返回，跳过改写/检索/Rerank
+        cached = self.cache.get_retrieval(query)
+        if cached is not None:
+            docs, image_descriptions, all_image_paths = cached
+            print("[缓存] 检索命中（跳过改写/混合检索/Rerank）")
+            return docs, image_descriptions, all_image_paths
+
         # ① 查询改写 + 混合检索 + RRF 融合 + Rerank（3.0 检索增强）
         #    docs 含义不变：仍是"最终喂给 LLM 的 top_k 片段"
         search_queries = [query]
@@ -339,6 +351,9 @@ class DocxRetriever:
 
         image_descriptions = "\n".join(desc_parts)
 
+        # 4.3：写检索缓存（键=原问题；文档更新时 knowledge_base 会主动清空）
+        self.cache.set_retrieval(query, docs, image_descriptions, all_image_paths)
+
         return docs, image_descriptions, all_image_paths
 
 
@@ -367,6 +382,8 @@ class DocxQAService:
     def __init__(self):
         # ---------- 检索器 ----------
         self.retriever = DocxRetriever()
+        # 4.3：复用检索器里的 Redis 缓存实例（避免重复连接）
+        self.cache = self.retriever.cache
 
         # ---------- 记忆 ----------
         self.memory = ConversationMemory()
@@ -502,6 +519,15 @@ class DocxQAService:
         # 步骤 1：获取历史对话（滑动窗口，只取最近 N 轮）
         history_text = self.memory.get_history_text(limit=config.MEMORY_WINDOW)
 
+        # 4.3：回答缓存只在【无历史】时生效（多轮追问的回答依赖历史上下文，
+        #     缓存单轮答案会导致答非所问；无历史=新会话，缓存安全）
+        use_answer_cache = not history_text.strip()
+        if use_answer_cache:
+            cached_answer = self.cache.get_answer(query)
+            if cached_answer is not None:
+                print("[缓存] 回答命中（直接返回缓存答案）")
+                return cached_answer
+
         # 步骤 2：检索 + 图片描述
         docs, image_descriptions, image_paths = self.retriever.retrieve(query)
 
@@ -510,6 +536,10 @@ class DocxQAService:
 
         # 步骤 4：LLM 生成回答
         answer = self.chain.invoke({"context": context, "query": query})
+
+        # 4.3：无历史时写回答缓存（下次相同问题直接命中）
+        if use_answer_cache:
+            self.cache.set_answer(query, answer)
 
         # 步骤 5：保存本轮对话到记忆
         self.memory.save(query, answer, context)
@@ -540,6 +570,16 @@ class DocxQAService:
         """
         # 步骤 1-3：与 ask() 完全相同
         history_text = self.memory.get_history_text(limit=config.MEMORY_WINDOW)
+
+        # 4.3：与 ask() 相同——回答缓存只在无历史时生效，命中直接整段返回
+        use_answer_cache = not history_text.strip()
+        if use_answer_cache:
+            cached_answer = self.cache.get_answer(query)
+            if cached_answer is not None:
+                print("[缓存] 回答命中（直接返回缓存答案）")
+                yield cached_answer
+                return
+
         docs, image_descriptions, image_paths = self.retriever.retrieve(query)
         context = self._format_context(docs, image_descriptions, image_paths, history_text)
 
@@ -548,6 +588,10 @@ class DocxQAService:
         for chunk in self.chain.stream({"context": context, "query": query}):
             full_answer += chunk
             yield chunk
+
+        # 4.3：无历史时写回答缓存
+        if use_answer_cache:
+            self.cache.set_answer(query, full_answer)
 
         # 步骤 5：流结束后保存完整回答
         self.memory.save(query, full_answer, context)
