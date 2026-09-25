@@ -44,28 +44,53 @@ flowchart TB
         L1 -.- L2 -.- L3 -.- L4
     end
 
-    subgraph ST["向量层"]
-        E["嵌入模型<br/>text-embedding-v4"]
-        C[("Chroma 向量库<br/>本地持久化")]
+    subgraph KB["入库服务 knowledge_base.py"]
+        I1["MD5 去重 / 增量更新"]
+        I2["图片描述并行预计算<br/>qwen-vl-max × 4 线程"]
+        I3["批量向量化入库<br/>text-embedding-v4 · 32/批"]
+        I4["BM25 索引重建 +<br/>自动术语提取"]
+        I5["清空 Redis 缓存"]
     end
 
-    subgraph QA["问答层"]
-        R["混合检索 + Rerank"]
-        M["对话模型<br/>deepseek-v4-pro"]
-        V["视觉模型<br/>qwen-vl-max（PDF 图片转写）"]
+    subgraph ST["存储层"]
+        C[("Chroma 向量库<br/>runtime/chroma_db")]
+        B[("BM25 词法索引<br/>runtime/bm25_index.pkl")]
+        R[("Redis 两级缓存<br/>检索缓存 + 回答缓存")]
     end
+
+    subgraph QA["问答层 qa_service.py"]
+        Q5["回答缓存命中？<br/>仅无对话历史"]
+        Q1["检索缓存命中？<br/>键 = 原问题"]
+        Q2["查询改写<br/>自动术语扩展"]
+        Q3["混合检索 → RRF 融合<br/>向量 + BM25"]
+        Q4["Rerank 精排<br/>gte-rerank · 熔断降级"]
+        Q6["LLM 流式生成<br/>deepseek-v4-pro"]
+    end
+
+    M["对话记忆<br/>滑动窗口"]
 
     D1 & D2 & D3 & D4 --> F
     F --> L1 & L2 & L3 & L4
-    L1 & L2 & L3 & L4 --> E --> C
+    L1 & L2 & L3 & L4 --> I1 --> I2 --> I3 --> C
+    I3 --> I4 --> B
+    I4 --> I5 --> R
 
-    U["用户问题"] --> R --> C
-    C --> R --> M --> A["回答"]
-    R -.图片内容补充.- V
-    MEM["对话记忆<br/>滑动窗口"] -.多轮上下文.- M
+    U["用户问题"] --> Q5
+    Q5 -->|命中| A["回答"]
+    Q5 -->|未命中| Q1
+    Q1 -->|命中| Q6
+    Q1 -->|未命中| Q2 --> Q3 --> Q4 --> Q6
+    C --> Q3
+    B --> Q3
+    R -.缓存命中直接返回.- Q5
+    R -.缓存命中直接返回.- Q1
+    Q6 --> A
+    Q6 -.写回答缓存.- R
+    Q6 --> M
+    M -.多轮上下文.- Q6
 ```
 
-**流程一句话**：用户文档 → 对应 Loader 解析成文本片段 → 嵌入模型向量化 → 存入 Chroma → 用户提问时经查询改写 → 混合检索（向量 + BM25）→ RRF 融合 → Rerank 精排 → 截取 TOP-K 相关片段 → 连同对话记忆交给大模型生成回答；PDF 中的图片页面会先经视觉模型转写。
+**流程一句话**：入库时文档经对应 Loader 解析成文本片段 → 图片并行转写描述（qwen-vl-max）→ 批量向量化存入 Chroma，同时重建 BM25 索引并自动提取领域术语；问答时问题先查 Redis 两级缓存（检索 + 回答，命中直接返回，省 API 成本）→ 查询改写 → 混合检索（向量 + BM25）→ RRF 融合 → Rerank 精排 → 连同对话记忆交给 deepseek-v4-pro 流式生成回答；文档更新后自动清空缓存，Redis 未启动自动降级直连。
 
 ## 目录结构
 
@@ -94,7 +119,8 @@ flowchart TB
     ├── chroma_db/       #   向量库
     ├── output/          #   提取的图片
     ├── file_md5.txt     #   去重记录
-    └── auto_dict.json   #   自动术语词典（入库时生成）
+    ├── auto_dict.json   #   自动术语词典（入库时生成）
+    └── conversation_memory.jsonl  #   对话历史
 ```
 
 ## 快速开始
