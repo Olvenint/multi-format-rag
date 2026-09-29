@@ -12,8 +12,9 @@ PyMuPDF
 pdfplumber
 openpyxl
 
-# ---- Web 界面 ----
-gradio
+# ---- 服务化（v5.0，FastAPI 接口）----
+fastapi
+uvicorn
 
 # ---- 缓存（可选，v4.3：未装未启动会自动降级直连）----
 redis

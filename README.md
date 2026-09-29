@@ -2,7 +2,7 @@
 
 一个**本地、多格式**的知识库问答（RAG）系统：把 `docx / pdf / txt / excel` 文档解析、向量化、存入本地向量库，再基于检索结果调用大模型回答你的问题。
 
-> 本项目为个人学习项目（v4.3），支持离线上库 + 在线问答两条流程，所有数据存本地，无需部署服务。
+> 个人学习项目（v5.0）：支持离线上库 + 在线问答，内置 **FastAPI 服务化接口**（`/health` `/ingest` `/query` `/documents`），任意程序 / 前端可对接；数据存本地。
 
 ## 功能特性
 
@@ -12,15 +12,18 @@
 - **表格感知**：docx 表格按行拆分为独立文档片段，保留结构语义
 - **PDF 图文并重**：文本用 pdfplumber 抽取、含图页面用视觉模型转写
 - **对话记忆**：滑动窗口记录最近 N 轮对话，支持多轮追问
-- **Web 界面**：基于 Gradio，开箱即用
 - **混合检索**：向量 + BM25 双路召回 → RRF 融合，专有名词不再漏召
 - **查询改写自动化**：入库自动提取文档高频术语（`term_extractor.py` → `runtime/auto_dict.json`），查询时自动扩展（"成绩"→"学习成绩"），全程零手写
 - **Rerank 精排**：API 精排把最相关片段排到最前，失败自动降级不阻塞
 - **入库性能优化**：图片描述 4 线程并行 + 向量按批 32 提交（v4.0），实测 13 图 docx 入库 228s → 11.8s
 - **IPv4 优先补丁**：自动跳过 IPv6 超时（v4.1 hotfix），embedding 单次 42.9s → 0.7s，网络差环境也能秒连
 - **Redis 两级缓存**（v4.3）：检索 + 回答两级缓存，高频问题命中缓存直接返回（省 embedding / rerank / DeepSeek 成本）；Redis 未启动自动熔断降级为直连，问答不受影响
+- **FastAPI 服务化**（v5.0）：`/health` `/ingest` `/query` `/documents` 四个 REST 接口，SSE 流式回答、异步并发，任意程序 / 前端可对接
+- **多会话隔离**（v5.0）：按 `session_id` 各会话独立记忆（Redis Hash + TTL，不可用退 JSONL 冷备份），多用户互不串话
 
 ## 界面演示
+
+> 以下为本地 Gradio 演示界面截图（Gradio 仅供本地演示，不随开源仓库分发）；对外集成请使用 FastAPI 接口。
 
 ![文档入库界面](docs/images/loader.png)
 
@@ -34,6 +37,10 @@
 
 ```mermaid
 flowchart TB
+    subgraph API["服务化接入层 app_api.py（5.0）"]
+        AP1["GET /health"] & AP2["POST /ingest"] & AP3["POST /query"] & AP4["GET /documents"]
+    end
+
     subgraph IN["输入层"]
         D1["docx 文档"] & D2["PDF 文档"] & D3["TXT 文档"] & D4["Excel 文档"]
     end
@@ -55,7 +62,7 @@ flowchart TB
     subgraph ST["存储层"]
         C[("Chroma 向量库<br/>runtime/chroma_db")]
         B[("BM25 词法索引<br/>runtime/bm25_index.pkl")]
-        R[("Redis 两级缓存<br/>检索缓存 + 回答缓存")]
+        R[("Redis<br/>两级缓存 + 会话记忆")]
     end
 
     subgraph QA["问答层 qa_service.py"]
@@ -63,19 +70,22 @@ flowchart TB
         Q1["检索缓存命中？<br/>键 = 原问题"]
         Q2["查询改写<br/>自动术语扩展"]
         Q3["混合检索 → RRF 融合<br/>向量 + BM25"]
-        Q4["Rerank 精排<br/>gte-rerank · 熔断降级"]
+        Q4["Rerank 精排<br/>qwen3.7-text-rerank · 熔断降级"]
         Q6["LLM 流式生成<br/>deepseek-v4-pro"]
     end
 
-    M["对话记忆<br/>滑动窗口"]
+    M["对话记忆<br/>会话隔离（Redis Hash + 冷备份）"]
 
+    AP1 -.ping Redis.- R
+    AP2 --> F
+    AP4 -.读 Chroma 元数据.- C
+    AP3 --> U["用户问题 / 程序请求"]
+    U --> Q5
     D1 & D2 & D3 & D4 --> F
     F --> L1 & L2 & L3 & L4
     L1 & L2 & L3 & L4 --> I1 --> I2 --> I3 --> C
     I3 --> I4 --> B
     I4 --> I5 --> R
-
-    U["用户问题"] --> Q5
     Q5 -->|命中| A["回答"]
     Q5 -->|未命中| Q1
     Q1 -->|命中| Q6
@@ -90,14 +100,13 @@ flowchart TB
     M -.多轮上下文.- Q6
 ```
 
-**流程一句话**：入库时文档经对应 Loader 解析成文本片段 → 图片并行转写描述（qwen-vl-max）→ 批量向量化存入 Chroma，同时重建 BM25 索引并自动提取领域术语；问答时问题先查 Redis 两级缓存（检索 + 回答，命中直接返回，省 API 成本）→ 查询改写 → 混合检索（向量 + BM25）→ RRF 融合 → Rerank 精排 → 连同对话记忆交给 deepseek-v4-pro 流式生成回答；文档更新后自动清空缓存，Redis 未启动自动降级直连。
+**流程一句话**：程序经 FastAPI（`app_api.py`）发请求 → 入库走 `POST /ingest`（Loader 解析 → 图片并行转写 → 批量向量化存入 Chroma → BM25 重建 + 自动术语提取 → 清 Redis 缓存）；问答走 `POST /query`（先查 Redis 两级缓存，命中直接返回 → 查询改写 → 混合检索 + RRF → Rerank 精排 → 连同会话记忆交给 deepseek-v4-pro 流式生成）；`session_id` 隔离各会话记忆，`stream=true` 逐字推送。
 
 ## 目录结构
 
 ```
 .
-├── app_file_loader.py   # Web 界面：文档入库（:7860）
-├── app_chat.py          # Web 界面：对话问答（:7861）
+├── app_api.py           # FastAPI 服务化入口（v5.0，:8000，/health /ingest /query /documents）
 ├── config_data.py       # 全部配置（模型名、路径、检索参数）
 ├── loader_factory.py    # 加载器工厂（按扩展名分发）
 ├── knowledge_base.py    # 向量库操作（入库/检索/查询）
@@ -127,22 +136,14 @@ flowchart TB
 
 ### 1. 环境要求
 
-- Python 3.9+
+- Python 3.10+
 - 具备两个模型服务的 API Key（见下）
+- （可选）Redis：装 / 不装都能跑；装了有缓存加速 + 多会话热存储
 
 ### 2. 安装依赖
 
 ```bash
 pip install -r requirements.txt
-```
-
-### 2.1 Redis 缓存（可选）
-
-Redis 用于缓存高频问答结果（v4.3）。**不安装 / 不启动也不影响使用**：系统自动降级为直连；启动后命中缓存可省 API 费用、加快响应。
-
-```bash
-pip install redis
-redis-server   # 启动 Redis（Windows 可下载 redis-windows 或 Memurai）
 ```
 
 ### 3. 配置 API Key（必做）
@@ -161,7 +162,7 @@ export DEEPSEEK_API_KEY="你的DeepSeek Key"
 
 | 环境变量 | 用途 | 获取地址 |
 |---|---|---|
-| `DASHSCOPE_API_KEY` | 嵌入模型 + 视觉模型（阿里云百炼） | https://bailian.console.aliyun.com |
+| `DASHSCOPE_API_KEY` | 嵌入模型 + 视觉模型 + Rerank（阿里云百炼） | https://bailian.console.aliyun.com |
 | `DEEPSEEK_API_KEY` | 对话模型（DeepSeek 开放平台） | https://platform.deepseek.com |
 
 ### 4. 修改模型（可选）
@@ -169,26 +170,60 @@ export DEEPSEEK_API_KEY="你的DeepSeek Key"
 默认模型在 `config_data.py` 顶部，按需改成你自己开通的模型：
 
 ```python
-EMBEDDING_MODEL = "text-embedding-v4"   # 嵌入模型（通义千问）
-CHAT_MODEL      = "deepseek-v4-pro"     # 对话模型（DeepSeek）
-VISION_MODEL    = "qwen-vl-max"         # 视觉模型（通义千问）
+EMBEDDING_MODEL = "text-embedding-v4"    # 嵌入模型（通义千问）
+CHAT_MODEL      = "deepseek-v4-pro"      # 对话模型（DeepSeek）
+VISION_MODEL    = "qwen-vl-max"          # 视觉模型（通义千问）
+RERANK_MODEL    = "qwen3.7-text-rerank"  # Rerank 精排（百炼）
 ```
 
-### 5. 使用
-
-**① 文档入库**（把文档丢进知识库，浏览器打开 Gradio）：
+### 5. 启动 FastAPI 服务（对外接口，:8000）
 
 ```bash
-python app_file_loader.py
-# 浏览器访问 http://127.0.0.1:7860
+python -m uvicorn app_api:app --host 0.0.0.0 --port 8000
+# 浏览器打开 http://127.0.0.1:8000/docs 查看接口文档并可交互调试
 ```
 
-**② 启动问答界面**（浏览器打开 Gradio）：
+接口清单：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/health` | 健康检查（真实 ping Redis） |
+| POST | `/ingest` | 上传文档入库（`-F "file=@xxx.pdf"`） |
+| POST | `/query` | 问答；`stream=true` 走 SSE 流式；`session_id` 多会话隔离 |
+| GET | `/documents` | 列出已入库文档 |
+
+curl 示例：
 
 ```bash
-python app_chat.py
-# 浏览器访问 http://127.0.0.1:7861
+# ① 健康检查
+curl http://127.0.0.1:8000/health
+
+# ② 问答（一次返回）
+curl -X POST http://127.0.0.1:8000/query -H "Content-Type: application/json" \
+  -d '{"query":"这个项目是干嘛的？","session_id":"u1"}'
+
+# ③ 流式问答（逐字输出）
+curl -N -X POST http://127.0.0.1:8000/query -H "Content-Type: application/json" \
+  -d '{"query":"这个项目是干嘛的？","stream":true}'
+
+# ④ 文档入库
+curl -X POST http://127.0.0.1:8000/ingest -F "file=@你的文档.pdf"
+
+# ⑤ 列出已入库文档
+curl http://127.0.0.1:8000/documents
 ```
+
+多会话：第一次不带 `session_id` 问，返回里会给你一个；下次带上它，对话记忆自动恢复、互不串话。
+
+### 6. Redis（可选，推荐）
+
+```bash
+pip install redis
+redis-server   # Windows 可用 redis-windows / Memurai
+```
+
+- **缓存**：高频问题命中 Redis 直接返回，省 embedding / rerank / DeepSeek 成本；未启动自动降级直连，功能不受影响
+- **多会话热存储**：`session:{sid}` Hash + TTL 自动清理；不可用自动回退 JSONL 冷备份
 
 ## 常见问题 FAQ
 
@@ -208,10 +243,13 @@ python app_chat.py
 不需要。`runtime/auto_dict.json` 由 `term_extractor.py` 在每次文档入库时自动生成/更新（自动提取文档高频实词），查询时 `query_rewriter.py` 自动匹配扩展。你只需正常入库文档即可，全程零手写。
 
 **Q6：Rerank 功能需要额外配置吗？**
-需要。系统内置 Rerank 精排（`reranker.py`，默认模型 `gte-rerank`），但 **Rerank 依赖你自行开通阿里云百炼的 `gte-rerank` 模型**（模型广场搜索「文本排序」开通，通常有免费额度）。未开通时系统自动降级为 RRF 排序，问答功能不受影响；开通后无需改代码，重启即生效。
+需要。系统内置 Rerank 精排（`reranker.py`，默认模型 `qwen3.7-text-rerank`），需自行开通阿里云百炼的「文本排序」模型（模型广场搜索开通，通常有免费额度）。未开通时系统自动降级为 RRF 排序，问答功能不受影响；开通后无需改代码，重启即生效。
 
 **Q7：Redis 缓存（v4.3）必须要安装吗？**
 不需要。`redis_cache.py` 内置熔断降级：Redis 未启动 / 连接失败时自动跳过缓存直连问答（只打印一次提示），功能完全正常；想启用缓存只需 `pip install redis` 并启动 `redis-server`。文档更新时系统会自动清空旧缓存，无需手动处理。
+
+**Q8：这个项目怎么给别人用？**
+启动 FastAPI 服务（`uvicorn app_api:app --host 0.0.0.0 --port 8000`）后，其他程序 / 前端直接发 HTTP 请求即可（接口见「快速开始」）。同局域网设备用你的 IP 访问；跨公网需部署到云服务器（如阿里云/腾讯云）或使用内网穿透。
 
 ## 项目演进
 
@@ -224,6 +262,7 @@ python app_chat.py
 | v4.1 | 性能 hotfix：IPv4 优先补丁，修复 IPv6 超时导致的 API 慢连接（实测提速 ~60 倍） |
 | v4.2 | 查询改写自动化：入库自动术语提取（term_extractor → auto_dict.json），查询自动扩展，零手写 |
 | v4.3 | Redis 两级缓存：检索 + 回答缓存，高频问题命中直接返回，省 API 成本；未启动自动降级直连 |
+| v5.0 | FastAPI 服务化（/health /ingest /query /documents，SSE 流式，异步并发）+ 多会话隔离记忆（Redis Hash + TTL，JSONL 冷备份） |
 
 ## License
 

@@ -55,7 +55,7 @@ from memory import ConversationMemory
 from bm25_index import BM25Index
 from query_rewriter import QueryRewriter
 from reranker import Reranker
-from redis_cache import RedisCache
+from redis_cache import RedisCache, SessionMemory
 
 # ============================================================
 # IPv4 优先补丁（v4.1 性能 hotfix）
@@ -203,13 +203,13 @@ class DocxRetriever:
         初始化检索器
 
         参数：
-            top_k: 返回的文档数量，不传则用 config.TOP_K（默认 2）
+            top_k: 返回的文档数量，不传则用 config.TOP_K（默认 3）
         """
         self.top_k = top_k or config.TOP_K
 
         # 连接 Chroma 向量数据库（会自动从 persist_directory 加载已有数据）
         self.chroma = Chroma(
-            collection_name=config.COLLECTION_NAME,        # 表名：docx_rag
+            collection_name=config.COLLECTION_NAME,        # 表名：rag_knowledge_base
             embedding_function=DashScopeEmbeddings(        # 嵌入模型：把查询文本向量化
                 model=config.EMBEDDING_MODEL               # text-embedding-v4
             ),
@@ -386,7 +386,12 @@ class DocxQAService:
         self.cache = self.retriever.cache
 
         # ---------- 记忆 ----------
+        # 5.0：多会话隔离（学习 L11）——固定全局记忆 ConversationMemory 保留给 Gradio 演示
+        # 用，API 服务传 session_id 时走 SessionMemory（一个会话一个 Redis Hash / 冷备份文件）。
         self.memory = ConversationMemory()
+        self.session_memory = None
+        if config.SESSION_ENABLED:
+            self.session_memory = SessionMemory(cache=self.cache)
 
         # ---------- 提示词模板 ----------
         # system 消息：定义 AI 的角色和行为规范
@@ -488,14 +493,30 @@ class DocxQAService:
         return "\n".join(parts)
 
     # ============================================================
+    # 私有方法：按会话取/存记忆（5.0：多会话隔离）
+    # 有 session_id 且会话记忆已启用 → 走 SessionMemory（各会话各管各的）
+    # 否则回退到固定全局 ConversationMemory（兼容 Gradio，不破坏演示）
+    # ============================================================
+    def _get_history(self, session_id: str = None) -> str:
+        if session_id and self.session_memory is not None:
+            return self.session_memory.get_history_text(session_id, config.MEMORY_WINDOW)
+        return self.memory.get_history_text(limit=config.MEMORY_WINDOW)
+
+    def _save_turn(self, session_id: str, query: str, answer: str, context: str) -> None:
+        if session_id and self.session_memory is not None:
+            self.session_memory.save(session_id, query, answer, context)
+        else:
+            self.memory.save(query, answer, context)
+
+    # ============================================================
     # 公开方法：问答入口
     # ============================================================
-    def ask(self, query: str) -> str:
+    def ask(self, query: str, session_id: str = None) -> str:
         """
         一站式问答入口
 
         内部流程：
-            ① memory.get_history_text()
+            ① 取该会话历史（有 session_id → 会话记忆；无 → 全局记忆）
                → 历史对话文本（滑动窗口，最近 N 轮）
 
             ② DocxRetriever.retrieve(query)
@@ -507,17 +528,17 @@ class DocxQAService:
             ④ self.chain.invoke({"context": context, "query": query})
                → LLM 生成的回答字符串
 
-            ⑤ self.memory.save(query, answer, context)
-               → 持久化保存本轮问答记录
+            ⑤ 保存本轮问答到对应会话记忆
 
         参数：
-            query: 用户自然语言问题
+            query:      用户自然语言问题
+            session_id: 会话标识（可选）。传了走多会话隔离记忆；None 走全局记忆（Gradio 用）
 
         返回：
             AI 助手的回答
         """
         # 步骤 1：获取历史对话（滑动窗口，只取最近 N 轮）
-        history_text = self.memory.get_history_text(limit=config.MEMORY_WINDOW)
+        history_text = self._get_history(session_id)
 
         # 4.3：回答缓存只在【无历史】时生效（多轮追问的回答依赖历史上下文，
         #     缓存单轮答案会导致答非所问；无历史=新会话，缓存安全）
@@ -542,14 +563,14 @@ class DocxQAService:
             self.cache.set_answer(query, answer)
 
         # 步骤 5：保存本轮对话到记忆
-        self.memory.save(query, answer, context)
+        self._save_turn(session_id, query, answer, context)
 
         return answer
 
     # ============================================================
     # 公开方法：流式问答入口（逐 token 返回）
     # ============================================================
-    def ask_stream(self, query: str):
+    def ask_stream(self, query: str, session_id: str = None):
         """
         流式问答入口 —— 逐 token yield，前端可实现打字机效果
 
@@ -563,13 +584,14 @@ class DocxQAService:
             ⑤ 流结束后保存完整回答到记忆
 
         参数：
-            query: 用户自然语言问题
+            query:      用户自然语言问题
+            session_id: 会话标识（可选）。传了走多会话隔离记忆；None 走全局记忆
 
         yield：
             每次返回一小段文字（token），前端拼接显示
         """
         # 步骤 1-3：与 ask() 完全相同
-        history_text = self.memory.get_history_text(limit=config.MEMORY_WINDOW)
+        history_text = self._get_history(session_id)
 
         # 4.3：与 ask() 相同——回答缓存只在无历史时生效，命中直接整段返回
         use_answer_cache = not history_text.strip()
@@ -594,7 +616,7 @@ class DocxQAService:
             self.cache.set_answer(query, full_answer)
 
         # 步骤 5：流结束后保存完整回答
-        self.memory.save(query, full_answer, context)
+        self._save_turn(session_id, query, full_answer, context)
 
 
 # ============================================================

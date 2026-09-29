@@ -31,6 +31,8 @@ Redis 两级缓存（v4.3：检索缓存 + 回答缓存，依据学习 L07）
     - 检索缓存与历史无关（检索只依赖问题本身），始终生效。
 """
 import json
+import os
+from datetime import datetime
 from typing import List, Optional, Tuple
 
 import config_data as config
@@ -167,6 +169,135 @@ class RedisCache:
             return True
         except Exception:
             return False
+
+
+# ============================================================
+# 多会话记忆（5.0，依据学习 L11）：一个 session:{sid} Hash 存一个会话的多轮对话
+# ============================================================
+class SessionMemory:
+    """
+    多会话记忆隔离：按 session_id 各存各的对话历史，解决多用户串话。
+
+    设计（贴近真实生产"热会话"层）：
+        - 存储：Redis Hash，键 = `session:{sid}`，每个 field = 一轮对话
+          field 名如 "1"、"2"..."N"（按轮次递增），值为一轮的 JSON。
+        - TTL（SESSION_TTL）：会话过期自动消失，无需手动清理（对应 L07 "Hash 格子 + 保质期"）。
+        - 降级：Redis 不可用时回退到按 session 分文件的 JSONL 冷备份
+          （SESSION_DIR/{sid}.jsonl），保证服务不因 Redis 缺位而中断。
+
+    与旧 ConversationMemory 的区别：
+        ConversationMemory = 单一全局 JSONL（所有用户共享）→ 会串话；
+        SessionMemory      = 一个会话一个 Hash/file → 各管各的。
+
+    用法：
+        mem = SessionMemory()
+        mem.save(sid, "问题", "回答")          # 存一轮
+        text = mem.get_history_text(sid)       # 取该会话历史，格式化
+    """
+
+    def __init__(self, cache: RedisCache = None):
+        self.cache = cache or _get_cache()
+
+    # --------------------------------------------------------
+    # 写入：保存一轮问答到某个会话
+    # --------------------------------------------------------
+    def save(self, session_id: str, query: str, answer: str, context: str = "") -> None:
+        record = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "query": query,
+            "answer": answer,
+            "context": context,
+        }
+        client = self.cache._get_client()
+        if client is not None:
+            try:
+                # 该会话已有多少轮，作为下一个 field 名（1 起）
+                field = str(client.hlen(f"session:{session_id}") + 1)
+                client.hset(f"session:{session_id}", field, json.dumps(record, ensure_ascii=False))
+                # 刷新 TTL：有活动就会话重新计时，"活跃的会话继续活，废弃的自动清"
+                client.expire(f"session:{session_id}", config.SESSION_TTL)
+                return
+            except Exception:
+                pass  # Redis 写失败 → 落回本地文件
+
+        self._fallback_save(session_id, record)
+
+    def _fallback_save(self, session_id: str, record: dict) -> None:
+        """Redis 不可用时的冷备份：按 session 分文件，避免多会话互相读错"""
+        os.makedirs(config.SESSION_DIR, exist_ok=True)
+        path = os.path.join(config.SESSION_DIR, f"{session_id}.jsonl")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    # --------------------------------------------------------
+    # 读取：加载某会话最近 N 轮
+    # --------------------------------------------------------
+    def load_recent(self, session_id: str, limit: int = 5) -> list:
+        client = self.cache._get_client()
+        if client is not None:
+            try:
+                # hgetall 拿全部 field，按 field 名（轮次）排序取最近 N 轮
+                fields = client.hgetall(f"session:{session_id}")
+                if fields:
+                    ordered = sorted(fields.items(), key=lambda kv: int(kv[0]))
+                    records = [json.loads(v) for _, v in ordered]
+                    return records[-limit:]
+                return []  # Hash 为空 → 无历史
+            except Exception:
+                pass
+        return self._fallback_recent(session_id, limit)
+
+    def _fallback_recent(self, session_id: str, limit: int = 5) -> list:
+        path = os.path.join(config.SESSION_DIR, f"{session_id}.jsonl")
+        if not os.path.exists(path):
+            return []
+        records = []
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    records.append(json.loads(line))
+        return records[-limit:]
+
+    # --------------------------------------------------------
+    # 工具：格式化为可注入 LLM 上下文的历史文本（与 ConversationMemory 同格式）
+    # --------------------------------------------------------
+    def get_history_text(self, session_id: str, limit: int = 5) -> str:
+        records = self.load_recent(session_id, limit)
+        if not records:
+            return ""
+        lines = []
+        for r in records:
+            lines.append(f"用户：{r['query']}")
+            lines.append(f"AI：{r['answer']}")
+            lines.append("")
+        return "\n".join(lines).strip()
+
+    # --------------------------------------------------------
+    # 管理：清空某会话 / 清空全部会话
+    # --------------------------------------------------------
+    def clear_session(self, session_id: str) -> None:
+        client = self.cache._get_client()
+        if client is not None:
+            try:
+                client.delete(f"session:{session_id}")
+            except Exception:
+                pass
+        path = os.path.join(config.SESSION_DIR, f"{session_id}.jsonl")
+        if os.path.exists(path):
+            os.remove(path)
+
+    def clear_all_sessions(self) -> None:
+        client = self.cache._get_client()
+        if client is not None:
+            try:
+                keys = client.keys("session:*")
+                if keys:
+                    client.delete(*keys)
+            except Exception:
+                pass
+        import shutil
+        if os.path.isdir(config.SESSION_DIR):
+            shutil.rmtree(config.SESSION_DIR, ignore_errors=True)
 
 
 # ============================================================

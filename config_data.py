@@ -43,7 +43,7 @@ RRF_K = 60                                                      # RRF 融合常�
 
 # --- Rerank 精排（L05，API 版，失败自动熔断降级）---
 RERANK_ENABLED = True                                           # Rerank 开关
-RERANK_MODEL = "gte-rerank"                                     # 百炼 rerank 模型
+RERANK_MODEL = "qwen3.7-text-rerank"                            # 百炼 rerank 模型
 RERANK_TOP_N = 10                                               # 送给 Rerank 的候选数
 
 # ============================================================
@@ -63,6 +63,15 @@ REDIS_PASSWORD = None                   # 密码（本机默认无密码）
 REDIS_SOCKET_TIMEOUT = 1.0              # 连接超时（秒）：超时即熔断降级，不阻塞问答
 RETRIEVAL_CACHE_TTL = 86400             # 检索缓存 TTL（秒，默认 24h；文档更新时会主动清空）
 ANSWER_CACHE_TTL = 86400                # 回答缓存 TTL（秒，默认 24h；文档更新时会主动清空）
+
+# ============================================================
+# 会话记忆配置（5.0：多会话隔离，依据学习 L11）
+# Redis Hash session:{sid} 存每会话多轮对话，TTL 自动清废弃会话；
+# Redis 不可用时回退到按 session 分文件（SESSION_PATH 下）的 JSONL 冷备份。
+# ============================================================
+SESSION_ENABLED = True          # 多会话总开关：False 时回落为旧的单 JSONL 全局记忆（兼容 Gradio）
+SESSION_TTL = 86400             # 会话记忆过期时间（秒，默认 24h），TTL 到自动清，不用手动删
+SESSION_DIR = os.path.join(RUNTIME_DIR, "sessions")   # Redis 不可用时按 session 分文件的冷备份目录
 
 # 记忆配置
 MEMORY_WINDOW = 5            # 滑动窗口大小：只保留最近 N 轮对话

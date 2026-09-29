@@ -119,6 +119,7 @@ class KnowledgeBase:
         file_path: str,
         documents: List[Document],
         operator: str = "",
+        source_name: str = "",
     ) -> dict:
         """
         将 Loader 已切分好的 Document 列表存入 Chroma。
@@ -132,12 +133,13 @@ class KnowledgeBase:
             file_path: 原始文件路径（用于 MD5 去重和 source 识别）
             documents: 任意 BaseLoader.load() 的返回值
             operator: 操作者名称（可选）
+            source_name: 入库 source 标识（可选，缺省用 file_path 文件名；API 上传场景应传原始文件名，避免临时文件名的随机名污染 source）
 
         返回：
             {"total": int, "inserted": int, "skipped": int, "deleted": int, "msg": str}
         """
         file_md5 = _get_file_md5(file_path)
-        source_name = os.path.basename(file_path)
+        source_name = source_name or os.path.basename(file_path)
 
         # 4.0：记录总耗时与分阶段耗时（帮助观察性能优化效果）
         t_total_start = time.time()
