@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG 知识库问答</title>
+<!--
+  UI 设计系统：ui-ux-pro-max-skill 生成（极简瑞士风 Minimalism & Swiss Style）
+  - 配色：中性灰 + 链接蓝（Primary #475569 / Accent #2563EB / Bg #F8FAFC）
+  - 字体：系统无衬线栈（中文优先，不引外部字体，保证国内加载快）
+  - UX 要点：流式打字机输出、输入框明显样式、可见标签、焦点可见、对比度 4.5:1
+  - 图标：内联 SVG（Heroicons 风格，无 emoji）
+-->
+<style>
+/* ===== Design Tokens（ui-ux-pro-max 推荐值）===== */
+:root {
+  --color-primary: #475569;
+  --color-on-primary: #ffffff;
+  --color-secondary: #64748b;
+  --color-on-secondary: #ffffff;
+  --color-accent: #2563eb;
+  --color-on-accent: #ffffff;
+  --color-background: #f8fafc;
+  --color-foreground: #1e293b;
+  --color-card: #ffffff;
+  --color-card-foreground: #1e293b;
+  --color-muted: #eaeff3;
+  --color-muted-foreground: #475569;
+  --color-border: #e2e8f0;
+  --color-destructive: #dc2626;
+  --color-on-destructive: #ffffff;
+  --color-ring: #475569;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-card: 0 1px 2px rgba(30, 41, 59, .05), 0 1px 3px rgba(30, 41, 59, .08);
+  --font-sans: "Atkinson Hyperlegible", -apple-system, "Segoe UI", "PingFang SC",
+               "Microsoft YaHei", "Noto Sans SC", sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--color-foreground);
+  background: var(--color-background);
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font: inherit; cursor: pointer; }
+input, textarea { font: inherit; }
+
+/* 焦点可见（键盘导航可访问性） */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ===== 布局 ===== */
+.app {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* 左侧栏 */
+.sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  background: var(--color-card);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  transition: transform .25s ease;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.brand .logo {
+  width: 34px; height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--color-foreground);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.brand h1 { font-size: 15px; font-weight: 700; letter-spacing: .2px; }
+.brand p { font-size: 12px; color: var(--color-muted-foreground); margin-top: 1px; }
+
+.sidebar-section { padding: 14px 16px; border-bottom: 1px solid var(--color-border); }
+
+.sidebar-section h2 {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-section h2 .icon-btn { padding: 4px; }
+
+/* 文档列表 */
+.doc-list { list-style: none; max-height: 200px; overflow-y: auto; }
+.doc-list li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--color-foreground);
+  word-break: break-all;
+}
+.doc-list li:hover { background: var(--color-muted); }
+.doc-list li svg { flex-shrink: 0; color: var(--color-muted-foreground); }
+.doc-list .empty { color: var(--color-muted-foreground); font-size: 13px; padding: 4px 10px; }
+
+/* 会话列表 */
+.session-list { list-style: none; max-height: 160px; overflow-y: auto; }
+.session-list li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+}
+.session-list li:hover, .session-list li.active { background: var(--color-muted); color: var(--color-foreground); }
+.session-list li svg { flex-shrink: 0; }
+
+.sidebar-footer {
+  margin-top: auto;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border);
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+  display: flex; align-items: center; gap: 8px;
+}
+
+/* 状态点 */
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; flex-shrink: 0; }
+.dot.ok { background: #22c55e; }
+.dot.err { background: var(--color-destructive); }
+
+/* 主区 */
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.topbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-card);
+}
+.topbar .spacer { flex: 1; }
+
+/* 通用按钮 */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  color: var(--color-foreground);
+  padding: 7px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background .2s ease, border-color .2s ease;
+}
+.btn:hover { background: var(--color-muted); }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn svg { width: 15px; height: 15px; }
+
+.btn-primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-on-accent); }
+.btn-primary:hover { background: #1d4ed8; }
+
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px;
+  border: none; background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-muted-foreground);
+  transition: background .2s ease, color .2s ease;
+}
+.icon-btn:hover { background: var(--color-muted); color: var(--color-foreground); }
+.icon-btn svg { width: 17px; height: 17px; }
+
+/* 对话区 */
+.chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 20px 12px;
+  scroll-behavior: smooth;
+}
+
+.chat-inner { max-width: 760px; margin: 0 auto; }
+
+.msg { display: flex; gap: 12px; margin-bottom: 22px; animation: msg-in .3s ease; }
+
+@keyframes msg-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.avatar {
+  width: 32px; height: 32px;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.avatar.user { background: var(--color-muted); color: var(--color-muted-foreground); }
+.avatar.ai { background: var(--color-foreground); color: #fff; }
+.avatar svg { width: 16px; height: 16px; }
+
+.bubble {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  border-top-left-radius: 4px;
+  padding: 12px 16px;
+  max-width: 100%;
+  box-shadow: var(--shadow-card);
+}
+.msg.user .bubble { background: var(--color-muted); border-color: transparent; border-top-left-radius: var(--radius-lg); border-top-right-radius: 4px; }
+
+.bubble .content { white-space: pre-wrap; word-break: break-word; }
+.bubble .content p { margin: 0 0 8px; }
+.bubble .content p:last-child { margin-bottom: 0; }
+.bubble .content code {
+  background: var(--color-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.bubble .content pre {
+  background: var(--color-foreground);
+  color: #e2e8f0;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.bubble .content pre code { background: none; color: inherit; padding: 0; }
+
+.meta {
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+  margin: 6px 2px 0;
+  display: flex; align-items: center; gap: 8px;
+}
+.meta .badge {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--color-muted);
+  color: var(--color-muted-foreground);
+}
+.meta .badge.hit { background: #dcfce7; color: #166534; }
+
+/* 欢迎屏 */
+.welcome { text-align: center; padding: 60px 20px 30px; color: var(--color-muted-foreground); }
+.welcome .big { font-size: 40px; margin-bottom: 14px; }
+.welcome h2 { font-size: 20px; color: var(--color-foreground); margin-bottom: 6px; }
+.welcome p { font-size: 14px; }
+
+/* 输入区 */
+.composer {
+  padding: 12px 20px 20px;
+  background: linear-gradient(transparent, var(--color-background) 30%);
+}
+.composer-inner {
+  max-width: 760px; margin: 0 auto;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  display: flex; align-items: flex-end; gap: 8px;
+  padding: 10px 10px 10px 16px;
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+.composer-inner:focus-within { border-color: var(--color-accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
+
+.composer textarea {
+  flex: 1;
+  border: none; outline: none; resize: none;
+  background: transparent;
+  color: var(--color-foreground);
+  max-height: 140px;
+  padding: 6px 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.composer textarea::placeholder { color: var(--color-muted-foreground); }
+
+.send-btn {
+  width: 36px; height: 36px;
+  border: none; border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  display: flex; align-items: center; justify-content: center;
+  transition: background .2s ease, opacity .2s ease;
+  flex-shrink: 0;
+}
+.send-btn:hover { background: #1d4ed8; }
+.send-btn:disabled { opacity: .45; cursor: not-allowed; }
+.send-btn svg { width: 17px; height: 17px; }
+
+.composer-hint {
+  max-width: 760px; margin: 8px auto 0;
+  font-size: 12px; color: var(--color-muted-foreground);
+  text-align: center;
+}
+
+/* 上传抽屉 */
+.drawer-mask {
+  position: fixed; inset: 0;
+  background: rgba(15, 23, 42, .45);
+  opacity: 0; pointer-events: none;
+  transition: opacity .25s ease;
+  z-index: 40;
+}
+.drawer-mask.open { opacity: 1; pointer-events: auto; }
+
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(420px, 92vw);
+  background: var(--color-card);
+  box-shadow: -12px 0 32px rgba(15, 23, 42, .16);
+  transform: translateX(100%);
+  transition: transform .3s ease;
+  z-index: 50;
+  display: flex; flex-direction: column;
+}
+.drawer.open { transform: none; }
+
+.drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+.drawer-head h3 { font-size: 15px; }
+.drawer-body { padding: 20px; overflow-y: auto; flex: 1; }
+
+.dropzone {
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 30px 16px;
+  text-align: center;
+  color: var(--color-muted-foreground);
+  transition: border-color .2s ease, background .2s ease;
+  cursor: pointer;
+}
+.dropzone:hover, .dropzone.drag { border-color: var(--color-accent); background: rgba(37, 99, 235, .04); }
+.dropzone svg { width: 30px; height: 30px; margin-bottom: 8px; color: var(--color-secondary); }
+.dropzone .fn { font-size: 13px; font-weight: 600; color: var(--color-foreground); margin-bottom: 4px; }
+.dropzone p { font-size: 12px; }
+
+.upload-status { margin-top: 16px; }
+.upload-status .row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  margin-bottom: 8px;
+  background: var(--color-background);
+}
+.upload-status .row.ok { border-color: #bbf7d0; background: #f0fdf4; }
+.upload-status .row.err { border-color: #fecaca; background: #fef2f2; }
+.upload-status .row svg { flex-shrink: 0; }
+.upload-status .row.ok svg { color: #16a34a; }
+.upload-status .row.err svg { color: var(--color-destructive); }
+
+/* 移动端 */
+.menu-btn { display: none; }
+
+@media (max-width: 900px) {
+  .sidebar { position: fixed; z-index: 60; left: 0; top: 0; bottom: 0; transform: translateX(-100%); box-shadow: 12px 0 32px rgba(15,23,42,.16); }
+  .sidebar.open { transform: none; }
+  .menu-btn { display: inline-flex; }
+  .chat { padding: 20px 14px 10px; }
+  .composer { padding: 10px 14px 16px; }
+}
+
+/* 尊重减弱动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ===== 左侧栏 ===== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M12 2a10 10 0 0 1 10 10v5a3 3 0 0 1-3 3h-2v-8h3"/><path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 17a3 3 0 0 0 3 3h2v-8H2"/></svg>
+      </div>
+      <div>
+        <h1>RAG 知识库</h1>
+        <p>多格式文档智能问答</p>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h2>
+        文档库
+        <button class="icon-btn" id="btnUploadTop" title="导入文档" aria-label="导入文档">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </button>
+      </h2>
+      <ul class="doc-list" id="docList">
+        <li class="empty">加载中…</li>
+      </ul>
+    </div>
+
+    <div class="sidebar-section">
+      <h2>会话</h2>
+      <ul class="session-list" id="sessionList"></ul>
+    </div>
+
+    <div class="sidebar-footer">
+      <span class="dot" id="redisDot" title="Redis 状态"></span>
+      <span id="redisText">连接中…</span>
+    </div>
+  </aside>
+
+  <!-- ===== 主区 ===== -->
+  <main class="main">
+    <div class="topbar">
+      <button class="icon-btn menu-btn" id="btnMenu" aria-label="打开菜单">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+      </button>
+      <span class="badge" id="sessionBadge" style="font-size:12px;padding:2px 10px;border-radius:999px;background:var(--color-muted);color:var(--color-muted-foreground)">会话：—</span>
+      <div class="spacer"></div>
+      <button class="btn" id="btnUpload">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        导入文档
+      </button>
+      <button class="btn" id="btnNewSession">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        新会话
+      </button>
+    </div>
+
+    <section class="chat" id="chat" aria-live="polite">
+      <div class="chat-inner" id="chatInner">
+        <div class="welcome" id="welcome">
+          <div class="big" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="44" height="44"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><path d="M8 11h.01"/><path d="M12 11h.01"/><path d="M16 11h.01"/></svg>
+          </div>
+          <h2>向你的知识库提问</h2>
+          <p>上传 docx / pdf / txt / excel 文档后，我可以基于文档内容回答你的问题。</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="composer">
+      <div class="composer-inner">
+        <textarea id="input" rows="1" placeholder="输入你的问题…（Enter 发送，Shift+Enter 换行）" aria-label="问题输入框"></textarea>
+        <button class="send-btn" id="sendBtn" aria-label="发送">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>
+        </button>
+      </div>
+      <div class="composer-hint">回答由大模型基于知识库生成，重要信息请以原文档为准</div>
+    </div>
+  </main>
+</div>
+
+<!-- ===== 上传抽屉 ===== -->
+<div class="drawer-mask" id="drawerMask"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="导入文档">
+  <div class="drawer-head">
+    <h3>导入文档</h3>
+    <button class="icon-btn" id="btnCloseDrawer" aria-label="关闭">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="drawer-body">
+    <div class="dropzone" id="dropzone">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="M9 15l3 3 3-3"/></svg>
+      <div class="fn">拖拽文档到这里，或点击选择</div>
+      <p>支持 .docx / .pdf / .txt / .md / .xlsx / .xls</p>
+    </div>
+    <input type="file" id="fileInput" accept=".docx,.pdf,.txt,.md,.xlsx,.xls" multiple hidden>
+    <div class="upload-status" id="uploadStatus"></div>
+  </div>
+</aside>
+
+<script>
+"use strict";
+/* ===== 状态 ===== */
+const state = {
+  sessionId: localStorage.getItem("rag_session_id") || null,
+  streaming: false,
+  sessions: JSON.parse(localStorage.getItem("rag_sessions") || "[]"),
+};
+
+const $ = (id) => document.getElementById(id);
+
+/* ===== 工具 ===== */
+function shortId(id) { return id ? id.slice(0, 8) : "—"; }
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function renderMarkdownish(text) {
+  // 极简渲染：转义 HTML 后支持 ```代码块```、**粗体** 与换行
+  const blocks = [];
+  const parts = text.split(/```/);
+  parts.forEach((part, i) => {
+    if (i % 2 === 1) {
+      blocks.push(`<pre><code>${esc(part)}</code></pre>`);
+    } else {
+      blocks.push(part.split(/\n{2,}/).map(p =>
+        `<p>${esc(p).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")}</p>`
+      ).join(""));
+    }
+  });
+  return blocks.join("");
+}
+
+/* ===== 消息 ===== */
+function addMsg(role, html, metaHtml) {
+  const wrap = $("welcome");
+  if (wrap) wrap.remove();
+  const el = document.createElement("div");
+  el.className = "msg " + role;
+  const avatar = role === "user"
+    ? `<div class="avatar user" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>`
+    : `<div class="avatar ai" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 1 10 10v5a3 3 0 0 1-3 3h-2v-8h3"/><path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 17a3 3 0 0 0 3 3h2v-8H2"/></svg></div>`;
+  const bubble = `<div class="bubble"><div class="content">${html}</div>${metaHtml ? `<div class="meta">${metaHtml}</div>` : ""}</div>`;
+  el.innerHTML = avatar + bubble;
+  $("chatInner").appendChild(el);
+  scrollBottom();
+  return el.querySelector(".content");
+}
+
+function scrollBottom() {
+  const chat = $("chat");
+  chat.scrollTop = chat.scrollHeight;
+}
+
+/* ===== 会话 ===== */
+function setSession(id, remember = true) {
+  state.sessionId = id;
+  if (remember) {
+    localStorage.setItem("rag_session_id", id);
+    if (!state.sessions.includes(id)) { state.sessions.unshift(id); localStorage.setItem("rag_sessions", JSON.stringify(state.sessions.slice(0, 20))); }
+  }
+  renderSessions();
+  $("sessionBadge").textContent = "会话：" + shortId(id);
+}
+function renderSessions() {
+  const ul = $("sessionList");
+  if (!state.sessions.length) { ul.innerHTML = '<li class="empty" style="color:var(--color-muted-foreground)">暂无历史会话</li>'; return; }
+  ul.innerHTML = state.sessions.slice(0, 8).map(id =>
+    `<li class="${id === state.sessionId ? "active" : ""}" data-sid="${id}" title="点击切换会话">
+       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+       <span>${shortId(id)}</span>
+     </li>`).join("");
+}
+$("sessionList").addEventListener("click", (e) => {
+  const li = e.target.closest("li[data-sid]");
+  if (!li) return;
+  setSession(li.dataset.sid);
+  $("chatInner").innerHTML = "";
+  addMsg("ai", `<div class="welcome" style="text-align:center;padding:40px 0;color:var(--color-muted-foreground)"><p>已切换到会话 <strong>${esc(li.dataset.sid)}</strong>，输入问题继续对话（历史记忆在该会话内恢复）。</p></div>`);
+});
+
+function newSession() {
+  const id = crypto.randomUUID ? crypto.randomUUID() : "s-" + Date.now().toString(36);
+  setSession(id);
+  $("chatInner").innerHTML = "";
+  const w = document.createElement("div");
+  w.className = "welcome"; w.id = "welcome";
+  w.innerHTML = `<div class="big" aria-hidden="true">💬</div><h2>新会话已开启</h2><p>直接输入问题开始吧。</p>`;
+  $("chatInner").appendChild(w);
+  $("input").focus();
+}
+
+/* ===== 健康检查 ===== */
+async function checkHealth() {
+  try {
+    const r = await fetch("/health", { cache: "no-store" });
+    const d = await r.json();
+    $("redisDot").className = "dot " + (d.redis ? "ok" : "err");
+    $("redisText").textContent = d.redis ? "服务正常 · Redis 在线" : "服务正常 · Redis 未连接（降级直连）";
+  } catch (e) {
+    $("redisDot").className = "dot err";
+    $("redisText").textContent = "无法连接服务";
+  }
+}
+
+/* ===== 文档 ===== */
+async function loadDocs() {
+  try {
+    const r = await fetch("/documents", { cache: "no-store" });
+    const d = await r.json();
+    const ul = $("docList");
+    if (!d.documents || !d.documents.length) {
+      ul.innerHTML = '<li class="empty">暂无文档，点击右上角「导入文档」入库</li>';
+      return;
+    }
+    ul.innerHTML = d.documents.map(name =>
+      `<li title="${esc(name)}">
+         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+         <span>${esc(name)}</span>
+       </li>`).join("");
+  } catch (e) {
+    $("docList").innerHTML = '<li class="empty">文档列表加载失败</li>';
+  }
+}
+
+/* ===== 上传 ===== */
+function openDrawer() { $("drawer").classList.add("open"); $("drawerMask").classList.add("open"); }
+function closeDrawer() { $("drawer").classList.remove("open"); $("drawerMask").classList.remove("open"); }
+$("btnUpload").addEventListener("click", openDrawer);
+$("btnUploadTop").addEventListener("click", openDrawer);
+$("btnCloseDrawer").addEventListener("click", closeDrawer);
+$("drawerMask").addEventListener("click", closeDrawer);
+$("dropzone").addEventListener("click", () => $("fileInput").click());
+$("dropzone").addEventListener("dragover", (e) => { e.preventDefault(); $("dropzone").classList.add("drag"); });
+$("dropzone").addEventListener("dragleave", () => $("dropzone").classList.remove("drag"));
+$("dropzone").addEventListener("drop", (e) => { e.preventDefault(); $("dropzone").classList.remove("drag"); uploadFiles(e.dataTransfer.files); });
+$("fileInput").addEventListener("change", (e) => { uploadFiles(e.target.files); e.target.value = ""; });
+
+async function uploadFiles(files) {
+  if (!files || !files.length) return;
+  const box = $("uploadStatus");
+  box.innerHTML = "";
+  for (const file of files) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span>${esc(file.name)} — 正在解析入库…</span>`;
+    box.appendChild(row);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch("/ingest", { method: "POST", body: fd });
+      const d = await r.json();
+      const ok = r.ok && d.status === "ok";
+      row.className = "row " + (ok ? "ok" : "err");
+      row.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        <span>${esc(file.name)} — ${ok ? `入库成功：${d.semantic_blocks ?? d.count ?? ""} 个语义块${d.duplicated ? "（已去重，未重复入库）" : ""}` : (d.detail || "入库失败")}</span>`;
+    } catch (e) {
+      row.className = "row err";
+      row.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><span>${esc(file.name)} — 网络错误</span>`;
+    }
+  }
+  loadDocs();
+  scrollBottom();
+}
+
+/* ===== 问答（流式 + 非流式双模式） ===== */
+async function sendMessage() {
+  const input = $("input");
+  const q = input.value.trim();
+  if (!q || state.streaming) return;
+  input.value = "";
+  autoResize();
+
+  addMsg("user", `<p>${esc(q)}</p>`);
+  const contentEl = addMsg("ai", `<p>思考中…</p>`);
+
+  state.streaming = true;
+  $("sendBtn").disabled = true;
+
+  // 先尝试流式（SSE 打字机）；失败则回退非流式
+  try {
+    await streamQuery(q, contentEl);
+  } catch (e) {
+    try {
+      contentEl.innerHTML = `<p>正在生成…</p>`;
+      const r = await fetch("/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q, session_id: state.sessionId }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || r.statusText);
+      contentEl.innerHTML = renderMarkdownish(d.answer || "");
+      if (d.session_id && d.session_id !== state.sessionId) setSession(d.session_id);
+    } catch (e2) {
+      contentEl.innerHTML = `<p>请求失败：${esc(e2.message || e2)}</p>`;
+    }
+  }
+  state.streaming = false;
+  $("sendBtn").disabled = false;
+  scrollBottom();
+}
+
+async function streamQuery(q, contentEl) {
+  const resp = await fetch("/query", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: q, session_id: state.sessionId, stream: true }),
+  });
+  if (!resp.ok) throw new Error("stream " + resp.status);
+  if (!resp.body) throw new Error("浏览器不支持流式");
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let answer = "";
+  let gotMeta = false;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // 解析 SSE：data: xxx\n\n
+    const parts = buffer.split(/\n\n/);
+    buffer = parts.pop();
+    for (const part of parts) {
+      const line = part.split("\n").find(l => l.startsWith("data:"));
+      if (!line) continue;
+      const payload = line.slice(5).trim();
+      if (!payload) continue;
+      // 服务端可能推送 meta 对象（JSON）或纯文本片段
+      if (!gotMeta && payload.startsWith("{")) {
+        try {
+          const meta = JSON.parse(payload);
+          if (meta.session_id) {
+            if (meta.session_id !== state.sessionId) setSession(meta.session_id);
+            gotMeta = true;
+            continue;
+          }
+        } catch (e) { /* 不是 JSON，当文本处理 */ }
+      }
+      answer += payload;
+      contentEl.innerHTML = renderMarkdownish(answer) + (answer ? "" : "");
+      scrollBottom();
+    }
+  }
+  if (!answer.trim()) contentEl.innerHTML = "<p>（空回复）</p>";
+  else contentEl.innerHTML = renderMarkdownish(answer);
+}
+
+/* ===== 输入框 ===== */
+const input = $("input");
+function autoResize() {
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 140) + "px";
+}
+input.addEventListener("input", autoResize);
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+$("sendBtn").addEventListener("click", sendMessage);
+
+/* ===== 新会话 / 菜单 ===== */
+$("btnNewSession").addEventListener("click", newSession);
+$("btnMenu").addEventListener("click", () => $("sidebar").classList.toggle("open"));
+document.addEventListener("click", (e) => {
+  const sb = $("sidebar");
+  if (window.innerWidth <= 900 && sb.classList.contains("open") && !sb.contains(e.target) && !$("btnMenu").contains(e.target)) {
+    sb.classList.remove("open");
+  }
+});
+
+/* ===== 初始化 ===== */
+(async function init() {
+  if (state.sessionId) {
+    setSession(state.sessionId, false);
+  } else {
+    newSession();
+  }
+  checkHealth();
+  loadDocs();
+  setInterval(checkHealth, 15000);
+})();
+</script>
+</body>
+</html>

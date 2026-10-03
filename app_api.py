@@ -34,7 +34,7 @@ if _THIS_DIR not in sys.path:
 
 import anyio
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import iterate_in_threadpool  # 驱动同步生成器的异步迭代（L10 真·逐字流式）
 
@@ -51,6 +51,14 @@ app = FastAPI(title="multi-format-rag API", version="5.0.0")
 
 # 全局只建一次问答服务（加载/连接一次，所有请求共用），避免重复初始化
 qa = DocxQAService()
+
+
+# ============================================================
+# GET / —— 前端页面（static/index.html，ui-ux-pro-max 设计系统）
+# ============================================================
+@app.get("/", include_in_schema=False)
+def index():
+    return FileResponse(os.path.join(_THIS_DIR, "static", "index.html"))
 
 
 # ============================================================
@@ -137,8 +145,10 @@ async def query(req: QueryRequest):
 
     if req.stream:
         # 流式分支（L10）：iterate_in_threadpool 把同步生成器丢线程池逐段驱动，
-        # 返回 async iterable（用 async for 消费），实现真·打字机效果
+        # 返回 async iterable（用 async for 消费），实现真·打字机效果。
+        # 首个事件先推 session_id（前端据此保存/恢复会话），再逐字推文本片段。
         async def gen():
+            yield f"data: {{\"session_id\": \"{session_id}\"}}\n\n"
             async for chunk in iterate_in_threadpool(
                 qa.ask_stream(req.query, session_id)
             ):
