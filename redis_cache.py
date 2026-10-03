@@ -303,19 +303,27 @@ class SessionMemory:
     # --------------------------------------------------------
     # 会话列表：供前端 /sessions 拉取（v5.2.1：会话记忆与列表统一存 Redis 服务端）
     # --------------------------------------------------------
-    def list_sessions(self) -> list:
+    def list_sessions(self, client_id: str = None) -> list:
         """
-        列出全部会话：{session_id, turns(轮数), last_active(最后活跃时间)}，按最后活跃时间倒序。
+        列出会话：{session_id, turns(轮数), last_active(最后活跃时间)}，按最后活跃时间倒序。
+
+        多会话按客户端区分（v5.2.2）：session_id 格式 = `{client_id}:{uuid}`，
+        传 client_id 时只返回该客户端的会话（startswith 过滤），不同浏览器/用户各看各的。
 
         - Redis 可用：keys("session:*") → 每个 Hash 里取数字 field（轮次）与最大轮次的 timestamp。
         - Redis 不可用/为空：回退读 SESSION_DIR 下 *.jsonl 冷备份（文件 mtime 作最后活跃时间）。
         """
+        def _match(sid: str) -> bool:
+            return (not client_id) or sid.startswith(client_id + ":")
+
         client = self.cache._get_client()
         sessions = []
         if client is not None:
             try:
                 for key in client.keys("session:*"):
                     sid = key[len("session:"):]
+                    if not _match(sid):
+                        continue
                     turns = 0
                     last_active = ""
                     for fname, fval in client.hgetall(key).items():
@@ -335,8 +343,10 @@ class SessionMemory:
                 sessions = []  # Redis 读失败 → 回退冷备份
         if not sessions:
             # Redis 不可用或没有任何会话 → 读 JSONL 冷备份目录
-            for path in glob(os.path.join(config.SESSION_DIR, "*.jsonl")):
+            for path in glob.glob(os.path.join(config.SESSION_DIR, "*.jsonl")):
                 sid = os.path.basename(path)[: -len(".jsonl")]
+                if not _match(sid):
+                    continue
                 mtime = datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M:%S")
                 turns = 0
                 with open(path, "r", encoding="utf-8") as f:

@@ -499,6 +499,17 @@ input, textarea { font: inherit; }
 <script>
 "use strict";
 /* ===== 状态（v5.2.1：会话记忆与列表统一存 Redis 服务端，不再用 localStorage）===== */
+/* ===== 客户端标识（v5.2.2：多会话按客户端区分——session_id = "{client_id}:{uuid}"，
+   每个浏览器只看到自己的会话；localStorage 仅存身份 ID，会话内容仍在 Redis 服务端）===== */
+const CLIENT_ID = (() => {
+  let c = localStorage.getItem("rag_client_id");
+  if (!c) {
+    c = crypto.randomUUID ? crypto.randomUUID() : "c-" + Date.now().toString(36);
+    localStorage.setItem("rag_client_id", c);
+  }
+  return c;
+})();
+
 const state = {
   sessionId: null,
   streaming: false,
@@ -508,7 +519,11 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 /* ===== 工具 ===== */
-function shortId(id) { return id ? id.slice(0, 8) : "—"; }
+function shortId(id) {
+  if (!id) return "—";
+  const tail = id.includes(":") ? id.split(":").pop() : id;  // 去掉客户端前缀
+  return tail.slice(0, 8);
+}
 function esc(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -566,14 +581,14 @@ function renderSessions() {
 }
 async function loadSessions() {
   try {
-    const r = await fetch("/sessions", { cache: "no-store" });
+    const r = await fetch("/sessions?client_id=" + encodeURIComponent(CLIENT_ID), { cache: "no-store" });
     const d = await r.json();
     state.sessions = d.sessions || [];
     if (state.sessions.length) {
       // 自动恢复到最近活跃会话（列表已按 last_active 倒序）
       setSession(state.sessions[0].session_id);
       $("chatInner").innerHTML = "";
-      addMsg("ai", `<div class="welcome" style="text-align:center;padding:40px 0;color:var(--color-muted-foreground)"><p>已恢复到最近会话 <strong>${esc(state.sessions[0].session_id)}</strong>（${state.sessions[0].turns} 轮），输入问题继续对话。</p></div>`);
+      addMsg("ai", `<div class="welcome" style="text-align:center;padding:40px 0;color:var(--color-muted-foreground)"><p>已恢复到最近会话 <strong>${esc(shortId(state.sessions[0].session_id))}</strong>（${state.sessions[0].turns} 轮），输入问题继续对话。</p></div>`);
     }
     renderSessions();
   } catch (e) {
@@ -589,7 +604,7 @@ $("sessionList").addEventListener("click", (e) => {
 });
 
 function newSession() {
-  const id = crypto.randomUUID ? crypto.randomUUID() : "s-" + Date.now().toString(36);
+  const id = CLIENT_ID + ":" + (crypto.randomUUID ? crypto.randomUUID() : "s-" + Date.now().toString(36));
   setSession(id);
   $("chatInner").innerHTML = "";
   const w = document.createElement("div");

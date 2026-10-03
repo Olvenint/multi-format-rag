@@ -118,8 +118,8 @@
 | `app_file_loader.py` | 文档上传 Web 界面（Gradio，:7860） | `process_and_store()` |
 | `app_chat.py` | 问答聊天 Web 界面（Gradio，:7861） | `respond()` |
 | `versions/` | 版本化改进计划快照（`IMPROVEMENT_PLAN_<版本>.md`） | 1.0 / 2.0 / 3.0 / 4.0 / 4.1 / 4.2 / 4.3 / 5.0 / 5.1 / 5.2 快照 |
-| `CHANGELOG.md` | 版本演进摘要（0 → 5.2.1） | 面向成果 |
-| `DEV_LOG.md` | 开发日志（每次修改详细记录，时间线溯源） | 任务 0 → 25 |
+| `CHANGELOG.md` | 版本演进摘要（0 → 5.2.2） | 面向成果 |
+| `DEV_LOG.md` | 开发日志（每次修改详细记录，时间线溯源） | 任务 0 → 26 |
 | `OPENSOURCE_CHECKLIST.md` | 开源前检查清单（私人） | 面向作者 |
 | `LEARNING_PLAN.md` | 对标企业级 RAG 的分阶段学习计划 | 位于 `rag_learning/`（学习侧） |
 | `README.md` | 项目总览与使用方法 | 本文档 |
@@ -404,8 +404,8 @@ rag_system/
 │   ├── conversation_memory.jsonl  # 全局对话历史
 │   ├── auto_dict.json          # 自动术语词典（入库时生成）
 │   └── bm25_index.pkl        # BM25 索引（自动生成）
-├── CHANGELOG.md                # 版本演进摘要（0 → 5.2.1）
-├── DEV_LOG.md                  # 开发日志（每次修改的详细记录，时间线溯源，任务 0 → 25）
+├── CHANGELOG.md                # 版本演进摘要（0 → 5.2.2）
+├── DEV_LOG.md                  # 开发日志（每次修改的详细记录，时间线溯源，任务 0 → 26）
 ├── OPENSOURCE_CHECKLIST.md     # 开源前检查清单（私人）
 └── README.md                   # 本文档
 ```
