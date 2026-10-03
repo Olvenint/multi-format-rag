@@ -1,0 +1,23 @@
+services:
+  redis:
+    image: redis:7-alpine          # 官方 Redis 镜像，不用自己写 Dockerfile
+    restart: unless-stopped        # 崩了/重启机器自动拉起
+    volumes:
+      - redis_data:/data           # Redis 数据卷：容器删了缓存/会话数据还在
+
+  rag:
+    build: .                      # 用当前目录的 Dockerfile 构建镜像
+    ports:
+      - "8000:8000"               # 本机 8000 → 容器 8000（对外开放的门）
+    environment:
+      - REDIS_HOST=redis          # 关键：容器内连 Redis 用服务名（不是 127.0.0.1）
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}   # 从本机环境变量透传（.env 或 shell 里配）
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}     # 同上
+    volumes:
+      - ./runtime:/app/runtime    # 知识库数据挂到本机 runtime/（容器删了数据不丢）
+    depends_on:
+      - redis                     # 先启动 redis，再启动 rag
+    restart: unless-stopped
+
+volumes:
+  redis_data:                     # 声明一个命名数据卷

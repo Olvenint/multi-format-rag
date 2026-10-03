@@ -56,7 +56,7 @@ INGEST_BATCH_SIZE = 32      # 向量化批量提交批次大小（每批一次 a
 # Redis 缓存配置（4.3：两级缓存，依据学习 L07）
 # ============================================================
 REDIS_ENABLED = True                    # 总开关：False 时完全不用 Redis（直接走检索+生成）
-REDIS_HOST = "127.0.0.1"                # Redis 地址（本机默认）
+REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")   # Redis 地址：本机默认 127.0.0.1；docker compose 传 REDIS_HOST=redis 自动指向 Redis 容器（L13）
 REDIS_PORT = 6379                       # Redis 端口（默认 6379）
 REDIS_DB = 0                            # Redis 数据库编号（默认 0）
 REDIS_PASSWORD = None                   # 密码（本机默认无密码）

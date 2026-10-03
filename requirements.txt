@@ -15,6 +15,7 @@ openpyxl
 # ---- 服务化（v5.0，FastAPI 接口）----
 fastapi
 uvicorn
+python-multipart  # /ingest 上传文件接口必需（FastAPI 表单依赖，本机常装常忘）
 
-# ---- 缓存（可选，v4.3：未装未启动会自动降级直连）----
+# ---- 缓存（v4.3：未装未启动会自动降级直连）----
 redis

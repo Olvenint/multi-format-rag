@@ -2,7 +2,7 @@
 
 一个**本地、多格式**的知识库问答（RAG）系统：把 `docx / pdf / txt / excel` 文档解析、向量化、存入本地向量库，再基于检索结果调用大模型回答你的问题。
 
-> 个人学习项目（v5.0）：支持离线上库 + 在线问答，内置 **FastAPI 服务化接口**（`/health` `/ingest` `/query` `/documents`），任意程序 / 前端可对接；数据存本地。
+> 个人学习项目（v5.1）：支持离线上库 + 在线问答，内置 **FastAPI 服务化接口**（`/health` `/ingest` `/query` `/documents`），任意程序 / 前端可对接；**Docker 容器化**一键部署（RAG + Redis 双容器）；数据存本地。
 
 ## 功能特性
 
@@ -20,6 +20,7 @@
 - **Redis 两级缓存**（v4.3）：检索 + 回答两级缓存，高频问题命中缓存直接返回（省 embedding / rerank / DeepSeek 成本）；Redis 未启动自动熔断降级为直连，问答不受影响
 - **FastAPI 服务化**（v5.0）：`/health` `/ingest` `/query` `/documents` 四个 REST 接口，SSE 流式回答、异步并发，任意程序 / 前端可对接
 - **多会话隔离**（v5.0）：按 `session_id` 各会话独立记忆（Redis Hash + TTL，不可用退 JSONL 冷备份），多用户互不串话
+- **Docker 容器化**（v5.1）：`docker compose up -d --build` 一键跑起 RAG + Redis 双容器（服务名互通），知识库挂 volume 不丢失，告别环境地狱
 
 ## 界面演示
 
@@ -107,7 +108,12 @@ flowchart TB
 ```
 .
 ├── app_api.py           # FastAPI 服务化入口（v5.0，:8000，/health /ingest /query /documents）
-├── config_data.py       # 全部配置（模型名、路径、检索参数）
+├── config_data.py       # 全部配置（模型名、路径、检索参数；REDIS_HOST 读环境变量）
+├── Dockerfile           # 容器化构建（python:3.11-slim + 清华 pip 源，v5.1）
+├── docker-compose.yml   # 双容器编排（rag + redis，服务名互通，v5.1）
+├── requirements.txt     # Python 依赖清单（容器与本地共用）
+├── .dockerignore        # 构建镜像时排除 runtime/.git/.env 等
+├── .env.example         # API Key 配置示例（复制为 .env 使用）
 ├── loader_factory.py    # 加载器工厂（按扩展名分发）
 ├── knowledge_base.py    # 向量库操作（入库/检索/查询）
 ├── qa_service.py        # 问答服务（检索+LLM+视觉）
@@ -215,7 +221,26 @@ curl http://127.0.0.1:8000/documents
 
 多会话：第一次不带 `session_id` 问，返回里会给你一个；下次带上它，对话记忆自动恢复、互不串话。
 
-### 6. Redis（可选，推荐）
+### 6. Docker 一键启动（可选，推荐）
+
+> 已装 Docker（Docker Desktop / Linux docker）即可跳过第 1~2 步环境安装，一条命令跑起 RAG + Redis 两个容器。
+
+```bash
+# ① 配置 API Key：复制 .env.example 为 .env 并填入密钥（或已在本机环境变量设置，compose 自动透传）
+
+# ② 一键构建 + 启动（首次构建需几分钟拉镜像装依赖）
+docker compose up -d --build
+
+# ③ 验证
+docker compose ps                          # rag + redis 两个容器都 Up
+curl http://127.0.0.1:8000/health          # {"status":"ok","redis":true}
+```
+
+- **数据持久化**：`./runtime`（知识库/索引/会话）挂载进容器，容器删了数据不丢；Redis 数据在命名卷 `redis_data`
+- **常用命令**：`docker compose logs rag`（看日志）｜`docker compose down`（停+删容器，数据保留）｜`docker compose up -d --build`（改代码后重建）
+- **容器内 Redis 地址**：compose 传 `REDIS_HOST=redis`，代码读环境变量（本机直跑默认 127.0.0.1，行为不变）
+
+### 7. Redis（可选，推荐）
 
 ```bash
 pip install redis
@@ -263,6 +288,7 @@ redis-server   # Windows 可用 redis-windows / Memurai
 | v4.2 | 查询改写自动化：入库自动术语提取（term_extractor → auto_dict.json），查询自动扩展，零手写 |
 | v4.3 | Redis 两级缓存：检索 + 回答缓存，高频问题命中直接返回，省 API 成本；未启动自动降级直连 |
 | v5.0 | FastAPI 服务化（/health /ingest /query /documents，SSE 流式，异步并发）+ 多会话隔离记忆（Redis Hash + TTL，JSONL 冷备份） |
+| v5.1 | Docker 容器化：Dockerfile + docker compose 双容器（rag + redis，服务名互通），`./runtime` 与 Redis 数据 volume 持久化，一键部署告别环境地狱 |
 
 ## License
 
