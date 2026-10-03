@@ -181,6 +181,19 @@ def documents():
 
 
 # ============================================================
+# GET /sessions —— 会话列表（v5.2.1：会话记忆与列表统一存 Redis 服务端，
+# 前端不再用 localStorage；含轮数/最后活跃时间，按活跃倒序）
+# ============================================================
+@app.get("/sessions")
+def sessions():
+    try:
+        lst = qa.session_memory.list_sessions() if qa.session_memory else []
+        return {"sessions": lst, "count": len(lst)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"列会话失败：{str(e)[:200]}") from e
+
+
+# ============================================================
 # 提示：直接运行本文件只打印启动命令（uvicorn 才真正开服务）
 # ============================================================
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ Redis 两级缓存（v4.3：检索缓存 + 回答缓存，依据学习 L07）
       缓存单轮答案会导致答非所问；详见 qa_service.DocxQAService）。
     - 检索缓存与历史无关（检索只依赖问题本身），始终生效。
 """
+import glob
 import json
 import os
 from datetime import datetime
@@ -298,6 +299,55 @@ class SessionMemory:
         import shutil
         if os.path.isdir(config.SESSION_DIR):
             shutil.rmtree(config.SESSION_DIR, ignore_errors=True)
+
+    # --------------------------------------------------------
+    # 会话列表：供前端 /sessions 拉取（v5.2.1：会话记忆与列表统一存 Redis 服务端）
+    # --------------------------------------------------------
+    def list_sessions(self) -> list:
+        """
+        列出全部会话：{session_id, turns(轮数), last_active(最后活跃时间)}，按最后活跃时间倒序。
+
+        - Redis 可用：keys("session:*") → 每个 Hash 里取数字 field（轮次）与最大轮次的 timestamp。
+        - Redis 不可用/为空：回退读 SESSION_DIR 下 *.jsonl 冷备份（文件 mtime 作最后活跃时间）。
+        """
+        client = self.cache._get_client()
+        sessions = []
+        if client is not None:
+            try:
+                for key in client.keys("session:*"):
+                    sid = key[len("session:"):]
+                    turns = 0
+                    last_active = ""
+                    for fname, fval in client.hgetall(key).items():
+                        if not fname.isdigit():
+                            continue  # 只统计数字轮次 field，跳过可能的元数据 field
+                        turns += 1
+                        try:
+                            ts = json.loads(fval).get("timestamp", "")
+                        except Exception:
+                            ts = ""
+                        if ts > last_active:  # 字符串时间戳字典序 = 时间序
+                            last_active = ts
+                    sessions.append({
+                        "session_id": sid, "turns": turns, "last_active": last_active,
+                    })
+            except Exception:
+                sessions = []  # Redis 读失败 → 回退冷备份
+        if not sessions:
+            # Redis 不可用或没有任何会话 → 读 JSONL 冷备份目录
+            for path in glob(os.path.join(config.SESSION_DIR, "*.jsonl")):
+                sid = os.path.basename(path)[: -len(".jsonl")]
+                mtime = datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M:%S")
+                turns = 0
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            turns += 1
+                sessions.append({
+                    "session_id": sid, "turns": turns, "last_active": mtime,
+                })
+        sessions.sort(key=lambda s: s["last_active"], reverse=True)
+        return sessions
 
 
 # ============================================================
