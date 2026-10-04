@@ -327,7 +327,7 @@ class DocxRetriever:
 
         ranked = sorted(rrf_scores.items(), key=lambda kv: kv[1], reverse=True)
         docs: List[Document] = [candidate_map[k] for k, _ in ranked]
-        docs = self.reranker.rerank(query, docs, self.top_k)
+        docs = self.reranker.rerank(query, docs[: config.RERANK_TOP_N], self.top_k)
         docs = docs[: self.top_k]
 
         # ② 收集图片路径 + 读取预计算描述
@@ -484,7 +484,7 @@ class DocxQAService:
 
         # 追加图片描述（如果有的话）
         if image_descriptions:
-            img_count = len(image_paths) if image_paths else 0
+            img_count = len([l for l in image_descriptions.splitlines() if l.strip()])  # 按描述条目计数，避免与路径数不一致
             parts.append(
                 f"\n【关联图片描述】（共 {img_count} 张）\n"
                 f"{image_descriptions}\n"

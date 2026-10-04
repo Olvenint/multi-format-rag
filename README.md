@@ -17,7 +17,7 @@
 5. **多轮对话记忆（5.0 升级为多会话隔离）**：滑动窗口保留最近 N 轮对话，支持连贯追问；按 `session_id` 隔离各会话记忆，互不串扰（Redis Hash `session:{sid}` + TTL，不可用自动回退 JSONL 冷备份）。
 6. **增量更新**：同名文件修改后重新上传，自动删除旧版本数据再插入新版本。
 7. **流式输出**：逐 token 返回回答，前端打字机效果。
-8. **服务化接口（5.0）**：FastAPI 暴露 `/health`、`/ingest`、`/query`、`/documents` REST 接口，供任意前端/小程序/后端调用；异步并发 + SSE 流式。
+8. **服务化接口（5.2.2）**：FastAPI 暴露 `/health`、`/ingest`、`/query`、`/documents`、`/sessions` REST 接口，供任意前端/小程序/后端调用；异步并发 + SSE 流式。
 9. **前端界面（5.2）**：浏览器打开 `http://127.0.0.1:8000/` 即见产品级对话界面（ui-ux-pro-max 设计系统：极简瑞士风 + 流式打字机 + 文档上传 + 会话管理），无需 curl 也能用。
 
 ---
@@ -85,7 +85,7 @@
 └─────────────────────────────────────────────────────────────┘
 
    ----[ 服务化接入层（5.0，FastAPI）]----
-  POST /ingest / POST /query / GET /documents / GET /health
+  POST /ingest / POST /query / GET /documents / GET /sessions / GET /health
   接口层用 anyio.to_thread.run_sync 跑同步逻辑，事件循环并发服务多请求；
   stream=true 走 SSE + iterate_in_threadpool，真·逐 token 推送。
 ```
@@ -114,7 +114,7 @@
 | `reranker.py` | Rerank 精排（百炼 API，熔断降级） | `Reranker` |
 | `redis_cache.py` | Redis 两级缓存（检索 + 回答，熔断降级）+ 会话记忆 Hash | `RedisCache`、`SessionMemory`，入库联动失效（4.3）、会话隔离（5.0） |
 | `memory.py` | 全局对话记忆管理 | `ConversationMemory` |
-| `app_api.py` | FastAPI 服务化入口（5.0，:8000） | `/health` `/ingest` `/query` `/documents`，异步并发 + SSE 流式 |
+| `app_api.py` | FastAPI 服务化入口（5.2.2，:8000） | `/health` `/ingest` `/query` `/documents` `/sessions`，异步并发 + SSE 流式 |
 | `app_file_loader.py` | 文档上传 Web 界面（Gradio，:7860） | `process_and_store()` |
 | `app_chat.py` | 问答聊天 Web 界面（Gradio，:7861） | `respond()` |
 | `versions/` | 版本化改进计划快照（`IMPROVEMENT_PLAN_<版本>.md`） | 1.0 / 2.0 / 3.0 / 4.0 / 4.1 / 4.2 / 4.3 / 5.0 / 5.1 / 5.2 快照 |
@@ -257,6 +257,7 @@ python -m uvicorn app_api:app --host 127.0.0.1 --port 8000 --reload
 | POST | `/ingest` | 上传文档 → 解析 → 增量入库（MD5 去重） |
 | POST | `/query` | 问答；`stream=true` 走 SSE 流式；`session_id` 隔离会话记忆，缺省自动生成 |
 | GET | `/documents` | 列出已入库文档 |
+| GET | `/sessions` | 列出会话（`?client_id=` 按客户端过滤） |
 
 `/query` 调用示例：
 
@@ -343,7 +344,7 @@ print(answer)
 3. ~~入库性能（串行）~~ **已解决（2026-09-21）**：图片描述 4 线程并行 + 向量按批 32 提交（4.0）；再叠加 IPv4 优先补丁（4.1）解决本机 IPv6 超时，实测同一份 13 图 docx 入库 **228s → 11.8s（约 19 倍提速）**。
 4. **本地 Chroma**：不支持并发写入和多租户。
 5. **评测体系**：已在学习侧 `rag_learning/` 建立（RAGAS 四项指标 + 人工评测集），主项目未内置评测脚本。
-6. **Rerank 实际使用状态**：`reranker.py` 功能已完整实现，但作者本机未开通百炼 `gte-rerank` 模型（403 AccessDenied），实际运行自动降级为 RRF 排序；**使用者如需启用 Rerank，须自行在百炼控制台开通 `gte-rerank` 模型**（通常有免费额度），开通后无需改代码，重启即生效。
+6. **Rerank 实际使用状态**：`reranker.py` 功能已完整实现，但作者本机未开通百炼 `qwen3.7-text-rerank` 模型（403 AccessDenied），实际运行自动降级为 RRF 排序；**使用者如需启用 Rerank，须自行在百炼控制台开通 `qwen3.7-text-rerank` 模型**（通常有免费额度），开通后无需改代码，重启即生效。
 7. **Redis 缓存（4.3）**：本机未常驻启动 Redis 服务时自动降级为直连（功能完整可用）；如需缓存生效需自行启动 `redis-server`（未启动只影响命中率，不影响正确性）。
 8. **多会话热存储（5.0）**：会话记忆当前存 Redis Hash + JSONL 回退；生产落到 MySQL/pgvector 等持久库、接入完整热/冷分层（如冷会话归档）仍在探索中。
 
@@ -369,7 +370,7 @@ rag_system/
 ├── redis_cache.py              # Redis 两级缓存（4.3，检索+回答，熔断降级）
 ├── ipv4_patch.py              # IPv4 优先补丁（4.1 hotfix，幂等）
 ├── memory.py                   # 对话记忆（Redis Hash 会话隔离 + JSONL+滑动窗口）
-├── app_api.py                  # FastAPI 服务化入口（5.0，:8000，/health /ingest /query /documents）
+├── app_api.py                  # FastAPI 服务化入口（5.2.2，:8000，/health /ingest /query /sessions /documents）
 ├── app_file_loader.py          # 上传界面（Gradio :7860，多格式）
 ├── app_chat.py                 # 聊天界面（Gradio :7861）
 ├── loaders/                    # 多格式解析器
@@ -388,6 +389,7 @@ rag_system/
 │   ├── IMPROVEMENT_PLAN_4.2.md # v4.2 查询改写自动化版（历史快照）
 │   ├── IMPROVEMENT_PLAN_4.3.md # v4.3 Redis 两级缓存版（历史快照）
 │   ├── IMPROVEMENT_PLAN_5.0.md # v5.0 服务化 + 多会话隔离版（历史快照）
+│   ├── IMPROVEMENT_PLAN_5.1.md # v5.1 容器化交付版（历史快照）
 │   └── IMPROVEMENT_PLAN_5.2.md # v5.2 前端界面版（当前）
 ├── static/                      # 前端页面（v5.2，浏览器开 http://127.0.0.1:8000/ 即见）
 │   └── index.html               # 单文件界面（对话 + 上传 + 会话，ui-ux-pro-max 设计系统）

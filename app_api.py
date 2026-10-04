@@ -1,5 +1,5 @@
 """
-RAG 系统 FastAPI 服务化入口（v5.0，服务化版）
+RAG 系统 FastAPI 服务化入口（v5.2.2，服务化版）
 
 把 v4.x 的 RAG 能力（入库 / 问答 / 检索缓存 / 多会话记忆）包装成程序可调的 REST API。
 
@@ -11,6 +11,7 @@ RAG 系统 FastAPI 服务化入口（v5.0，服务化版）
     POST   /ingest               上传文档 → 解析 → 向量化增量入库（MD5 去重）→ 返回入库统计
     POST   /query                问答（收 session_id → 多会话记忆；stream=true 走 SSE 流式）
     GET    /documents            列出已入库文档（读 Chroma 的 source 去重）
+    GET    /sessions             列出会话（?client_id= 按客户端过滤，v5.2.1）
 
 与 Gradio 的关系：
     - app_chat.py / app_file_loader.py 是给人点的演示界面，保留不动；
@@ -47,7 +48,7 @@ from knowledge_base import KnowledgeBase
 # ============================================================
 # FastAPI 应用对象（title/version 会显示在 /docs 页面）
 # ============================================================
-app = FastAPI(title="multi-format-rag API", version="5.0.0")
+app = FastAPI(title="multi-format-rag API", version="5.2.2")
 
 # 全局只建一次问答服务（加载/连接一次，所有请求共用），避免重复初始化
 qa = DocxQAService()
@@ -88,7 +89,7 @@ def health():
             redis_ok = bool(client.ping())
         except Exception:
             redis_ok = False
-    return {"status": "ok", "version": "5.0.0", "redis": redis_ok}
+    return {"status": "ok", "version": "5.2.2", "redis": redis_ok}
 
 
 # ============================================================

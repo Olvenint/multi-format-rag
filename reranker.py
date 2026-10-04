@@ -6,7 +6,7 @@ Rerank 精排（3.0 检索增强：把最相关的排到最前面）
     Rerank 只改【排序】、不改【召回】——recall 是第一阶段（混合检索）的活。
 
 实现（方案 ①：API Rerank）：
-    使用阿里云百炼（DashScope）的 rerank 模型（默认 gte-rerank），
+    使用阿里云百炼（DashScope）的 rerank 模型（默认 qwen3.7-text-rerank），
     与现有 DASHSCOPE_API_KEY 同一套 key 体系，无需新申请 key。
 
 容错（熔断降级）：
@@ -23,11 +23,11 @@ class Reranker:
     交叉编码器风格的精排器（API 版）
 
     用法：
-        reranker = Reranker(model="gte-rerank", enabled=True)
+        reranker = Reranker(model="qwen3.7-text-rerank", enabled=True)
         top = reranker.rerank(query, candidate_docs, top_k=3)
     """
 
-    def __init__(self, model: str = "gte-rerank", enabled: bool = True):
+    def __init__(self, model: str = "qwen3.7-text-rerank", enabled: bool = True):
         self.model = model
         self.enabled = enabled
         self._disabled = False  # 熔断标志：失败一次后本进程内不再调用 API

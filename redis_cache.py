@@ -242,11 +242,21 @@ class SessionMemory:
                 if fields:
                     ordered = sorted(fields.items(), key=lambda kv: int(kv[0]))
                     records = [json.loads(v) for _, v in ordered]
-                    return records[-limit:]
-                return []  # Hash 为空 → 无历史
+                    return self._merge_records(records, self._fallback_recent(session_id, limit), limit)
+                return self._fallback_recent(session_id, limit)  # Hash 为空 → 回退冷备份（防 Redis 恢复后丢失宕机期会话）
             except Exception:
                 pass
         return self._fallback_recent(session_id, limit)
+
+    @staticmethod
+    def _merge_records(*lists: list, limit: int = 5) -> list:
+        """合并 Redis 与 JSONL 冷备份记录：同一轮只算一份（按 timestamp 排序取最近 limit 轮）"""
+        merged = {}
+        for records in lists:
+            for r in records or []:
+                merged[(r.get("timestamp", ""), r.get("query", ""))] = r
+        ordered = sorted(merged.values(), key=lambda r: r.get("timestamp", ""))
+        return ordered[-limit:]
 
     def _fallback_recent(self, session_id: str, limit: int = 5) -> list:
         path = os.path.join(config.SESSION_DIR, f"{session_id}.jsonl")
@@ -325,7 +335,7 @@ class SessionMemory:
                     if not _match(sid):
                         continue
                     turns = 0
-                    last_active = ""
+                    last_active = 0.0
                     for fname, fval in client.hgetall(key).items():
                         if not fname.isdigit():
                             continue  # 只统计数字轮次 field，跳过可能的元数据 field
@@ -341,13 +351,13 @@ class SessionMemory:
                     })
             except Exception:
                 sessions = []  # Redis 读失败 → 回退冷备份
-        if not sessions:
-            # Redis 不可用或没有任何会话 → 读 JSONL 冷备份目录
+        if True:  # 无论 Redis 是否可用都并入 JSONL 冷备份，防止宕机期会话在 Redis 恢复后丢失（末尾按 session_id 合并去重）
+            # 并入 JSONL 冷备份目录中的会话（同 session_id 的 Redis/冷备份记录在末尾合并去重）
             for path in glob.glob(os.path.join(config.SESSION_DIR, "*.jsonl")):
                 sid = os.path.basename(path)[: -len(".jsonl")]
                 if not _match(sid):
                     continue
-                mtime = datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M:%S")
+                mtime = os.path.getmtime(path)  # float 时间戳，与 Redis 分支类型一致（合并/排序安全）
                 turns = 0
                 with open(path, "r", encoding="utf-8") as f:
                     for line in f:
@@ -356,6 +366,19 @@ class SessionMemory:
                 sessions.append({
                     "session_id": sid, "turns": turns, "last_active": mtime,
                 })
+        # 合并去重：同一会话 Redis 与冷备份各有一份时，轮数相加、活跃时间取最新
+        merged = {}
+        for s in sessions:
+            prev = merged.get(s["session_id"])
+            if prev is None:
+                merged[s["session_id"]] = s
+            else:
+                merged[s["session_id"]] = {
+                    "session_id": s["session_id"],
+                    "turns": prev["turns"] + s["turns"],
+                    "last_active": max(prev["last_active"], s["last_active"]),
+                }
+        sessions = list(merged.values())
         sessions.sort(key=lambda s: s["last_active"], reverse=True)
         return sessions
 

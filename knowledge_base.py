@@ -204,6 +204,7 @@ class KnowledgeBase:
             metadata.update({
                 "create_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "operator": operator,
+                "source": source_name,  # 覆盖 Loader 的临时文件名，保证 source=原文件名（/documents 列表与增量更新依赖）
             })
 
             # 组装预计算的图片描述
