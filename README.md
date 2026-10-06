@@ -291,6 +291,7 @@ multi-format-rag/
 ├── memory.py                   # 全局对话记忆管理（JSONL + 滑动窗口）
 ├── app_api.py                  # FastAPI 服务化入口（:8000，/health /ingest /query /documents /sessions）
 ├── loaders/                    # 多格式解析器
+│   ├── __init__.py
 │   ├── base_loader.py          # 抽象基类
 │   ├── docx_loader.py          # Word 解析（含表格）
 │   ├── pdf_loader.py           # PDF 解析（含表格）
@@ -298,12 +299,14 @@ multi-format-rag/
 │   └── excel_loader.py         # Excel 解析
 ├── static/
 │   └── index.html              # 前端界面（对话 + 上传 + 会话管理，零外部依赖）
-├── docs/                       # 文档
+├── docs/
+│   └── images/                 # 界面截图（chat.png 对话界面 / loader.png 入库界面）
 ├── Dockerfile                  # 容器化构建（python:3.11-slim + 清华 pip 源）
 ├── docker-compose.yml          # 双容器编排（rag + redis，compose 服务名互通）
 ├── requirements.txt            # Python 依赖清单（容器与本地共用）
 ├── .dockerignore               # 构建镜像时排除 runtime/.git/.env 等
 ├── .env.example                # API Key 配置示例（复制为 .env 使用）
+├── .gitignore                  # Git 忽略规则（runtime/.env/__pycache__ 等）
 ├── LICENSE                     # MIT License
 └── README.md                   # 本文档
 ```
